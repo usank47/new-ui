@@ -1,0 +1,10 @@
+{
+  "name": "AutoParts ERP — GST Billing, Inventory, Accounting & BUSY Integration",
+  "description": "Complete Indian Automotive Spare-Parts Accounting, GST Billing, Multi-Price Inventory, Touch POS, AI Purchase Invoice Extraction, and BUSY .DAT Integration Software.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

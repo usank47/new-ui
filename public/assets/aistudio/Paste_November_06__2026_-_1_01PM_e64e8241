@@ -1,0 +1,1809 @@
+# MASTER PROJECT COMMAND — COMPLETE AUTOMOTIVE ACCOUNTING, GST BILLING, INVENTORY & BUSY INTEGRATION SOFTWARE
+
+## 1. YOUR ROLE AND PRIMARY OBJECTIVE
+
+Act as a senior software architect, full-stack developer, accounting-software specialist, GST consultant, database architect, UI/UX designer, QA engineer, and automotive spare-parts industry domain expert.
+
+You are responsible for taking my existing GitHub repository, which is based on an existing Free GST Billing Software project, and transforming it into a complete, professional, reliable automotive spare-parts accounting and business-management application.
+
+This is not a request to create a new generic accounting application.
+
+The existing repository is the foundation. You must first import and thoroughly understand the entire repository, its architecture, source code, database structure, existing functions, calculations, APIs, components, and workflows. Then modify and extend the existing application according to all the requirements below.
+
+The final application should function as a complete accounting and inventory management system for an automotive spare-parts business in India.
+
+The software must combine:
+
+1. GST billing and accounting.
+2. Purchase and sales management.
+3. Automotive spare-parts inventory.
+4. Customer and supplier management.
+5. Ledgers, cashbook, payments and receipts.
+6. GST reports and returns.
+7. BUSY Accounting data import and export.
+8. AI-powered purchase invoice extraction.
+9. Barcode and counter billing.
+10. Touch-friendly POS.
+11. Vehicle compatibility and spare-parts cross-reference.
+12. Financial reports and business analytics.
+13. Backup, restoration and offline operation.
+
+Do not merely prepare a development plan or describe what needs to be done. Implement the application in the imported repository.
+
+---
+
+# 2. FIRST STEP: IMPORT AND UNDERSTAND THE EXISTING GITHUB REPOSITORY
+
+Import the complete GitHub repository from scratch.
+
+Before changing anything:
+
+- Examine the complete folder structure.
+- Identify the frontend framework and backend framework.
+- Identify the database and persistence mechanism.
+- Examine all existing pages, modules, components, routes, APIs and utilities.
+- Identify all existing GST calculations and accounting logic.
+- Understand existing purchase, sales, inventory, customer, supplier and product workflows.
+- Identify the existing authentication and company-management system.
+- Examine existing invoice generation, PDF generation and printing.
+- Examine existing backup and restore mechanisms.
+- Identify all dependencies and external integrations.
+- Identify existing tests and build processes.
+- Identify incomplete features, broken functions and duplicated code.
+- Identify all data models and relationships.
+
+Create an internal technical architecture document before implementation.
+
+IMPORTANT:
+
+Do not replace working functionality unnecessarily.
+
+Do not discard existing business logic simply because a different implementation seems easier.
+
+Preserve existing functionality wherever possible and extend it properly.
+
+Do not introduce a second database or parallel accounting engine without a genuine technical requirement.
+
+Do not hardcode demo data into production workflows.
+
+Do not create buttons or screens that appear functional but do not perform actual operations.
+
+Every implemented feature must connect to the actual application data and backend.
+
+If the existing architecture differs from what you expect, adapt the implementation to the actual repository instead of forcing a new architecture onto it.
+
+---
+
+# 3. OVERALL BUSINESS PURPOSE
+
+The application is designed primarily for an Indian automotive spare-parts trading business.
+
+It must support the daily activities of a spare-parts shop, including:
+
+- Purchasing spare parts from multiple suppliers.
+- Maintaining product and part-number masters.
+- Managing OEM and aftermarket brands.
+- Identifying parts using part numbers and barcodes.
+- Maintaining vehicle compatibility.
+- Maintaining purchase and selling prices.
+- Maintaining different customer price levels.
+- Selling to retail customers, mechanics, garages and wholesalers.
+- Managing inventory and stock valuation.
+- Managing returns and replacements.
+- Managing supplier outstanding balances.
+- Managing customer outstanding balances.
+- Recording cash, bank and other payments.
+- Preparing GST-compliant invoices.
+- Maintaining complete accounting books.
+- Importing existing accounting data from BUSY.
+- Generating financial and GST reports.
+
+The software must be suitable for everyday commercial use, not just demonstrations.
+
+---
+
+# 4. COMPANY, FINANCIAL YEAR AND ACCOUNTING FOUNDATION
+
+Retain and properly implement the existing company-management structure.
+
+The application should support:
+
+- Company creation and selection.
+- Company profile and GSTIN.
+- Business name and address.
+- State and state code.
+- Financial-year selection.
+- Opening balances.
+- Financial-year closing.
+- Multiple financial years.
+- Voucher numbering and series.
+- Configurable invoice numbering.
+- Company-specific settings.
+- Company-specific inventory and accounting data.
+
+All financial transactions must be associated with the correct company and financial year.
+
+Accounting records must be consistent and auditable.
+
+Implement a proper double-entry accounting foundation wherever the existing software supports it. Every financial voucher must have balanced debit and credit entries.
+
+Do not treat a list of transactions as a substitute for a proper ledger system.
+
+Maintain transaction references so that users can trace an accounting entry back to the original invoice, payment, receipt or journal voucher.
+
+---
+
+# 5. PRODUCT MASTER — AUTOMOTIVE SPARE-PARTS SPECIFIC
+
+This is one of the most important modules.
+
+The normal generic product master must be expanded into an automotive spare-parts product master.
+
+Each product should support the following fields wherever applicable:
+
+### Product identification
+
+- Product name.
+- Internal item code.
+- OEM part number.
+- Manufacturer part number.
+- Alternate part number.
+- SKU.
+- Barcode.
+- HSN code.
+- Product description.
+- Brand.
+- Manufacturer.
+- OEM or aftermarket classification.
+- Product category.
+- Product group.
+- Subcategory.
+- GST rate.
+- Unit of measurement.
+- Purchase unit.
+- Sales unit.
+- Unit conversion.
+
+### Pricing
+
+- Purchase price.
+- Last purchase price.
+- Average purchase cost.
+- MRP.
+- Retail selling price.
+- Mechanic selling price.
+- Wholesale selling price.
+- Special customer price.
+- Minimum selling price, where configured.
+- Discount percentage.
+- Margin and markup information.
+
+### Inventory
+
+- Opening stock.
+- Current stock.
+- Reserved stock.
+- Available stock.
+- Minimum stock.
+- Maximum stock.
+- Reorder level.
+- Reorder quantity.
+- Rack.
+- Shelf.
+- Bin location.
+- Material centre, if enabled.
+- Stock valuation.
+- Last purchase date.
+- Last sale date.
+- Fast-moving or slow-moving classification.
+- Dead-stock identification.
+
+### Automotive information
+
+Maintain vehicle compatibility information with the following hierarchy:
+
+Make → Model → Generation → Year → Fuel Type → Engine → Variant.
+
+Allow one product to be compatible with multiple vehicles.
+
+Allow multiple products to be compatible with the same vehicle.
+
+Support OEM and aftermarket cross-reference numbers.
+
+Support superseded part numbers and replacement part numbers.
+
+Support equivalent products from different manufacturers.
+
+IMPORTANT: Two products can have the same part number but belong to different brands. They must not automatically be merged merely because their part numbers match.
+
+The product identity and duplicate-checking logic must consider the relevant combination of brand, manufacturer, part number and other identifying information.
+
+### Product listing UI
+
+Make the product list compact and practical.
+
+Previously requested UI change:
+
+- Remove the Sale Price column from the main Products listing.
+- Remove the Vehicle Fitment column from the main Products listing.
+- Display these details inside the product's expandable row, dropdown or detailed product view.
+- Keep the main listing clean and easy to scan.
+- Allow users to view all product information without unnecessarily overcrowding the table.
+
+Product search must support:
+
+- Product name.
+- OEM part number.
+- Alternate part number.
+- SKU.
+- Barcode.
+- Brand.
+- Manufacturer.
+- Vehicle model.
+
+---
+
+# 6. INVENTORY MANAGEMENT
+
+Create a complete inventory management system.
+
+Required functions:
+
+- Opening stock.
+- Purchase stock inward.
+- Sales stock outward.
+- Sales return.
+- Purchase return.
+- Stock adjustment.
+- Stock transfer.
+- Stock journal.
+- Stock reconciliation.
+- Physical stock counting.
+- Stock valuation.
+- Low-stock alerts.
+- Reorder management.
+- Dead-stock reports.
+- Fast-moving and slow-moving reports.
+- Product-wise stock ledger.
+- Stock movement history.
+- Batch or serial tracking where relevant.
+
+### Negative stock
+
+I specifically require the option to allow negative stock.
+
+Do not permanently prevent sales merely because stock becomes negative.
+
+Provide a company-level inventory setting:
+
+- Allow negative stock: ON/OFF.
+
+When ON, users can complete sales even if the available stock is insufficient.
+
+When OFF, apply the configured stock restriction.
+
+The system must continue to show accurate stock balances and negative quantities when negative stock is permitted.
+
+Do not silently change inventory quantities to hide negative stock.
+
+### Multiple locations
+
+Provide an option to turn off multi-location inventory.
+
+When multi-location inventory is disabled:
+
+- Use a simple single-location inventory system.
+- Do not force users to select a warehouse or material centre for every transaction.
+- Hide unnecessary location-related fields.
+- Keep inventory and stock reports fully functional.
+
+When enabled, support multiple locations, material centres and stock transfers.
+
+---
+
+# 7. PURCHASE MANAGEMENT
+
+Create a complete purchase module.
+
+Support:
+
+- GST purchase invoices.
+- Non-GST purchases where applicable.
+- Cash purchases.
+- Credit purchases.
+- Supplier selection.
+- Purchase invoice number.
+- Supplier invoice date.
+- Purchase voucher date.
+- Due date.
+- Product selection.
+- Quantity.
+- Unit.
+- Purchase rate.
+- Discount.
+- Taxable value.
+- CGST.
+- SGST.
+- IGST.
+- Cess where applicable.
+- Freight.
+- Other charges.
+- Bill sundries.
+- Round-off.
+- Invoice total.
+- Paid amount.
+- Outstanding amount.
+- Payment references.
+
+Support purchase orders and conversion of purchase orders into purchase invoices.
+
+Support partial receipts and purchase returns.
+
+Maintain a complete supplier-wise purchase history.
+
+Every purchase must update:
+
+1. Product stock.
+2. Product purchase history.
+3. Supplier ledger.
+4. Purchase ledger.
+5. Input GST accounts.
+6. Cash or bank accounts, where payment is made.
+7. Outstanding balances, where credit is involved.
+
+Do not update these independently in ways that can create inconsistent books.
+
+A purchase voucher must be saved as one consistent transaction.
+
+---
+
+# 8. AI-POWERED PURCHASE BILL UPLOAD AND DATA EXTRACTION
+
+This feature is especially important.
+
+Different suppliers provide purchase bills in different formats. There is no single fixed invoice layout.
+
+The software must accept:
+
+- PDF purchase invoices.
+- Scanned PDFs.
+- JPG images.
+- JPEG images.
+- PNG images.
+- Photographs of supplier invoices.
+
+The first version of this feature is specifically for GST purchase invoices.
+
+Cloud AI processing is acceptable, but implement appropriate privacy safeguards and do not expose company financial data unnecessarily.
+
+### Supplier-specific formats
+
+The application must not assume every supplier uses the same invoice format.
+
+It must intelligently identify the document layout and extract the relevant information.
+
+The user must be able to define or correct what individual fields mean.
+
+Support supplier-specific extraction rules and templates that can be reused for subsequent invoices from the same supplier.
+
+### Information to extract
+
+- Supplier name.
+- Supplier GSTIN.
+- Supplier invoice number.
+- Invoice date.
+- Due date, if available.
+- Buyer information.
+- Buyer GSTIN.
+- Product name.
+- Product description.
+- Part number.
+- HSN.
+- Quantity.
+- Unit.
+- Rate.
+- Discount.
+- Taxable value.
+- GST rate.
+- CGST amount.
+- SGST amount.
+- IGST amount.
+- Cess.
+- Freight.
+- Other charges.
+- Round-off.
+- Grand total.
+
+Extract all available line-item details.
+
+Do not ignore additional charges or tax information.
+
+### Product matching
+
+After extracting the invoice, match the extracted items against the existing product master.
+
+The existing BUSY product list will be provided in Excel format.
+
+Use the existing product master as the authoritative source for existing product names.
+
+When a match is found, use the exact existing product name.
+
+Do not unnecessarily create a new product because of spelling differences, abbreviations, punctuation or supplier-specific descriptions.
+
+Matching should consider:
+
+- Existing product name.
+- OEM part number.
+- Alternate part number.
+- Brand.
+- Manufacturer.
+- SKU.
+- HSN.
+- Similar descriptions.
+
+Show uncertain matches for user review.
+
+Do not automatically merge products from different brands solely because their descriptions or part numbers appear similar.
+
+### Purchase invoice review screen
+
+After extraction, show an editable review screen before posting the purchase voucher.
+
+The user must be able to:
+
+- Correct supplier details.
+- Correct invoice number and date.
+- Change product mapping.
+- Create a new product if necessary.
+- Edit quantities.
+- Edit units.
+- Edit purchase rates.
+- Edit discounts.
+- Edit GST rates.
+- Edit tax amounts where permitted.
+- Edit freight and other charges.
+- Correct the final invoice amount.
+
+Show extraction confidence or warnings for uncertain fields.
+
+Compare the calculated invoice total against the supplier's printed total.
+
+Highlight differences.
+
+Never post an invoice without user confirmation.
+
+### Learning supplier formats
+
+Save confirmed supplier-specific mapping and extraction rules.
+
+The next time the same supplier's invoice is uploaded, reuse the saved format information.
+
+The system should improve matching over time, but must not silently apply an uncertain mapping.
+
+### Final posting
+
+After approval:
+
+- Validate the supplier.
+- Validate all products.
+- Validate GST calculations.
+- Validate invoice totals.
+- Check duplicate invoice numbers.
+- Check duplicate documents.
+- Create the actual purchase voucher.
+- Update stock.
+- Update supplier ledger.
+- Update GST accounts.
+- Update outstanding balances.
+
+The entire operation must be transactional.
+
+If posting fails, do not leave partial accounting or inventory entries.
+
+---
+
+# 9. BUSY ACCOUNTING INTEGRATION — CRITICAL REQUIREMENT
+
+BUSY Accounting is an important existing source of accounting and inventory data.
+
+The application must support importing both Masters and Transactions from BUSY.
+
+The previous implementation of BUSY import was unreliable. The file selection and import workflow did not work consistently.
+
+Do not repeat the earlier implementation mistakes.
+
+Do not create an import screen that merely looks functional.
+
+The complete import process must be implemented, tested and verified using actual BUSY export files.
+
+## 9.1 BUSY Masters export
+
+The BUSY export configuration used includes the following masters:
+
+- Account.
+- Item.
+- Account Group.
+- Unit Conversion.
+- BOM.
+- ST Form.
+- Sale Type.
+- Standard Narrations.
+- Purchase Type.
+- Item Group.
+- Executive.
+- Bill Sundry.
+- Tax Category.
+- Unit.
+- Discount Structure.
+
+The export also includes:
+
+- Opening Balances.
+- Bill-by-Bill References.
+
+The application must correctly identify, parse and import the supported master records.
+
+## 9.2 BUSY Transactions export
+
+The BUSY transactions export configuration includes:
+
+- Sales Orders.
+- Purchase Orders.
+- Sales.
+- Purchase.
+- Sales Return.
+- Purchase Return.
+- Stock Transfer.
+- Production.
+- Call Allocation.
+- Unassemble.
+- Stock Journal.
+- Material Issue.
+- Material Receipt.
+- Form Issued.
+- Forms Received.
+- Payment.
+- Receipt.
+- Call Report.
+- Journal.
+- Contra.
+- Debit Note.
+- Credit Note.
+- Sale Quotation.
+- Purchase Quotation.
+- Purchase Indent.
+- Call Receipt.
+
+The option "Export Relevant Masters Also" was enabled.
+
+Support these transaction types where their data structure and accounting meaning can be correctly mapped.
+
+If a transaction type is unsupported, clearly identify it and report it. Never silently discard it.
+
+## 9.3 BUSY DAT file handling
+
+BUSY exports are provided as .DAT files.
+
+The import system must support:
+
+- Selecting the Masters DAT file.
+- Selecting the Transactions DAT file.
+- Selecting multiple related files.
+- Uploading the selected files.
+- Detecting the file type.
+- Parsing the file structure.
+- Handling encoding and special characters.
+- Validating records.
+- Identifying relationships between masters and transactions.
+- Mapping BUSY fields to application fields.
+
+Do not assume that every .DAT file is plain text or has the same encoding.
+
+Inspect actual files and identify the actual BUSY export structure.
+
+If different BUSY versions generate different formats, design the parser to identify supported variations.
+
+If the file format requires a particular BUSY export option, explain the requirement clearly to the user.
+
+## 9.4 BUSY import wizard
+
+Create a complete step-by-step import wizard.
+
+The workflow should be:
+
+1. Select files.
+2. Upload files.
+3. Detect file types.
+4. Parse records.
+5. Classify masters and transactions.
+6. Match existing records.
+7. Map fields.
+8. Validate records.
+9. Identify duplicates.
+10. Review financial impact.
+11. Show import summary.
+12. Ask for confirmation.
+13. Import data.
+14. Verify database persistence.
+15. Refresh the application data.
+16. Show final import report.
+
+The user must be able to move backwards and forwards through the wizard without losing uploaded files or review decisions.
+
+### File selection
+
+The file input must work correctly in the actual browser.
+
+When the user selects a file:
+
+- Display the selected filename.
+- Display its size.
+- Display its detected type.
+- Display upload status.
+- Display any parsing errors.
+- Enable the next step only when appropriate.
+
+If a user selects a file and the file picker closes, the wizard must not remain unchanged without explanation.
+
+If upload fails, show the actual error.
+
+Do not hide errors.
+
+### Record classification and mapping
+
+Map BUSY records to the correct application modules.
+
+Examples:
+
+- Account → Customer, Supplier or Ledger.
+- Item → Product Master.
+- Account Group → Account Group.
+- Item Group → Product Group.
+- Unit → Unit of Measurement.
+- Unit Conversion → Unit Conversion.
+- Purchase → Purchase Voucher.
+- Sales → Sales Invoice.
+- Receipt → Receipt Voucher.
+- Payment → Payment Voucher.
+- Journal → Journal Voucher.
+- Contra → Contra Voucher.
+- Debit Note → Debit Note.
+- Credit Note → Credit Note.
+- Stock Journal → Stock Journal.
+- Sales Return → Sales Return.
+- Purchase Return → Purchase Return.
+
+Do not map every account to a customer.
+
+Determine the correct account type using BUSY account groups and other available information.
+
+Preserve opening balances and bill-by-bill references wherever supported.
+
+### Duplicate detection
+
+The system must distinguish between:
+
+- New records.
+- Existing records.
+- Updated records.
+- Duplicate records.
+- Skipped records.
+- Invalid records.
+- Unsupported records.
+- Unresolved records.
+
+Provide a clear duplicate policy.
+
+Never blindly overwrite existing products, customers, suppliers or vouchers.
+
+Provide appropriate options to skip, update or resolve duplicates.
+
+For transactions, duplicate detection should consider relevant identifiers such as voucher type, voucher number, date, party and amount.
+
+### Financial review
+
+Before final import, show:
+
+- Total source records.
+- Records parsed.
+- Records matched.
+- New records.
+- Updated records.
+- Duplicate records.
+- Skipped records.
+- Invalid records.
+- Unsupported records.
+- Unresolved records.
+- Records ready to import.
+
+All categories must reconcile.
+
+For example, if 1,120 source records are identified, the system must account for all 1,120 records. It must never claim that 1,040 were processed and leave 80 unexplained.
+
+The final report must mathematically reconcile.
+
+### Import safety
+
+Before importing:
+
+- Create an appropriate backup or restore point.
+- Validate all records.
+- Validate accounting relationships.
+- Validate transaction totals.
+- Validate opening balances.
+- Validate product and party references.
+
+Import should be atomic or safely resumable.
+
+Do not create duplicate vouchers when an import is retried.
+
+Maintain an import batch ID and a complete import audit log.
+
+Allow the user to review the imported records.
+
+Do not claim that import was successful merely because an API returned HTTP 200.
+
+Verify actual records in the database and in the application's UI.
+
+---
+
+# 10. ACCOUNTING MODULES
+
+Implement complete accounting functionality.
+
+## Ledgers
+
+Support:
+
+- Customer ledgers.
+- Supplier ledgers.
+- Cash ledger.
+- Bank ledgers.
+- Sales ledger.
+- Purchase ledger.
+- Direct expense ledgers.
+- Indirect expense ledgers.
+- Income ledgers.
+- GST input ledgers.
+- GST output ledgers.
+- Capital accounts.
+- Loan accounts.
+- Other current assets and liabilities.
+- Sundry debtors.
+- Sundry creditors.
+
+Each ledger must show:
+
+- Opening balance.
+- Debit entries.
+- Credit entries.
+- Transaction date.
+- Voucher number.
+- Particulars.
+- Reference.
+- Debit amount.
+- Credit amount.
+- Running balance.
+- Closing balance.
+
+Support ledger groups and subgroups.
+
+## Payment vouchers
+
+Support:
+
+- Cash payments.
+- Bank payments.
+- Supplier payments.
+- Expense payments.
+- Advance payments.
+- Multiple ledger allocations.
+- Payment references.
+- Cheque details.
+- UPI or bank transaction references.
+
+## Receipt vouchers
+
+Support:
+
+- Customer receipts.
+- Cash receipts.
+- Bank receipts.
+- Advance receipts.
+- Multiple invoice adjustments.
+- Bill-by-bill adjustment.
+- Payment references.
+
+## Journal vouchers
+
+Support:
+
+- General journal entries.
+- Expense adjustments.
+- Income adjustments.
+- Depreciation entries.
+- Opening balance adjustments.
+- Correction entries.
+
+Enforce debit-credit balancing.
+
+## Contra vouchers
+
+Support cash-to-bank, bank-to-cash and bank-to-bank transfers.
+
+## Credit notes and debit notes
+
+Support proper accounting and GST treatment.
+
+Maintain references to original invoices wherever applicable.
+
+## Cashbook and bankbook
+
+Provide:
+
+- Daily cashbook.
+- Monthly cashbook.
+- Bankbook.
+- Cash balance.
+- Bank balance.
+- Payment register.
+- Receipt register.
+- Transaction search.
+
+---
+
+# 11. SALES MANAGEMENT
+
+Create a complete sales invoicing module.
+
+Support:
+
+- GST tax invoices.
+- Retail invoices.
+- Cash sales.
+- Credit sales.
+- Customer selection.
+- Product search.
+- Barcode scanning.
+- Quantity.
+- Unit.
+- Rate.
+- Discount.
+- Taxable value.
+- GST calculation.
+- CGST.
+- SGST.
+- IGST.
+- Cess where applicable.
+- Round-off.
+- Other charges.
+- Invoice total.
+- Amount received.
+- Balance due.
+- Payment mode.
+- Multiple payment methods where supported.
+
+Support:
+
+- Sales order.
+- Sales invoice.
+- Delivery challan, where supported.
+- Sales return.
+- Credit note.
+- Customer outstanding.
+- Sales history.
+- Invoice cancellation with proper reversal entries.
+
+Provide configurable invoice numbering and printable PDF invoices.
+
+Invoice calculations must be accurate and consistent with the existing GST engine.
+
+Do not create a second independent GST calculation system.
+
+---
+
+# 12. CUSTOMER AND SUPPLIER MANAGEMENT
+
+Support detailed customer and supplier records.
+
+Fields should include:
+
+- Name.
+- Account code.
+- GSTIN.
+- PAN where applicable.
+- Address.
+- State.
+- State code.
+- Phone.
+- Email.
+- Contact person.
+- Credit limit.
+- Credit period.
+- Opening balance.
+- Current balance.
+- Ledger group.
+- Notes.
+
+Customer types:
+
+- Retail customer.
+- Mechanic.
+- Garage.
+- Workshop.
+- Wholesaler.
+- Dealer.
+- Other.
+
+Supplier records should include supplier-specific purchase history and product mappings.
+
+Provide:
+
+- Customer statement.
+- Supplier statement.
+- Outstanding report.
+- Ageing report.
+- Credit limit warnings.
+- Customer purchase history.
+- Supplier purchase history.
+- Customer-wise sales analysis.
+- Supplier-wise purchase analysis.
+
+Where relevant, allow vehicle information to be associated with a customer.
+
+---
+
+# 13. GST MANAGEMENT
+
+Retain and improve the existing GST functionality.
+
+Support:
+
+- GST registration details.
+- GST tax invoices.
+- CGST.
+- SGST.
+- IGST.
+- Cess where applicable.
+- HSN summaries.
+- Taxable value summaries.
+- Input tax credit.
+- Output tax liability.
+- GST purchase register.
+- GST sales register.
+- Credit notes.
+- Debit notes.
+- Purchase returns.
+- Sales returns.
+- GST rate-wise reports.
+- GSTR-1 supporting reports.
+- GSTR-3B supporting reports.
+- Input tax credit reports.
+- GST reconciliation.
+
+All GST calculations must be based on the correct place of supply, supplier/customer state, applicable tax rate and transaction type.
+
+Clearly distinguish between accounting records and government-filed returns.
+
+Do not claim that a return has been filed unless an actual filing integration has been completed.
+
+---
+
+# 14. PURCHASE ORDERS AND MANUFACTURING / BOM
+
+Retain and improve the existing purchase order and manufacturing/BOM functionality.
+
+Support:
+
+- Purchase orders.
+- Supplier-wise purchase orders.
+- Pending order quantities.
+- Partial purchase receipt.
+- Order-to-invoice conversion.
+- Bill of Materials.
+- Components.
+- Production.
+- Material issue.
+- Material receipt.
+- Assembly.
+- Unassembly.
+
+Where manufacturing functionality is not relevant to a trading workflow, it should remain available without interfering with ordinary purchase and sales operations.
+
+---
+
+# 15. TOUCH-FRIENDLY POS MODE
+
+Create a dedicated POS mode for fast counter billing.
+
+This was specifically requested.
+
+The POS interface must be designed for touchscreens as well as keyboard operation.
+
+The purpose is to create invoices quickly at a retail counter.
+
+### POS screen
+
+Provide:
+
+- Large product search.
+- Barcode input.
+- Product selection.
+- Product name.
+- Part number.
+- Brand.
+- Available stock.
+- MRP.
+- Selling price.
+- Quantity controls.
+- Discount controls.
+- Customer selection.
+- Payment mode.
+- Invoice total.
+- Amount received.
+- Balance.
+- Save and print.
+
+The interface must be compact, fast and uncluttered.
+
+Avoid unnecessary fields during normal billing.
+
+Support quick product addition and quantity changes.
+
+Support multiple products in a single invoice.
+
+Support viewing product prices quickly without creating an invoice.
+
+Support viewing customer statements from the counter workflow.
+
+The user must be able to move between product search, customer selection, quantity, discount, payment and printing without relying on a mouse.
+
+Do not make the POS screen a separate disconnected application. It must use the same product, stock, customer, accounting and invoice data as the main application.
+
+---
+
+# 16. KEYBOARD-FIRST OPERATION — MANDATORY
+
+The complete software must be usable with the keyboard.
+
+Keyboard-first operation is a major requirement.
+
+The user should be able to create sales invoices, purchase invoices, search products, select customers, enter quantities, apply discounts, record payments, save and print without needing a mouse.
+
+Implement the following shortcut system.
+
+### Global shortcuts
+
+- F1 — Help.
+- F2 — New Sales Invoice.
+- F3 — New Purchase Invoice.
+- F4 — Customer.
+- F5 — Supplier.
+- F6 — Product.
+- F7 — Payment Voucher.
+- F8 — Sales Return.
+- F9 — Purchase Return.
+- F10 — Save.
+- F11 — Dashboard.
+- F12 — Print.
+- Ctrl+K — Command Palette.
+- Ctrl+N — New Record.
+- Ctrl+S — Save.
+- Ctrl+F — Search.
+- Ctrl+P — Print.
+- Esc — Close current modal or screen.
+
+### POS shortcuts
+
+- Enter — Select product or confirm the current selection.
+- Tab — Move forward.
+- Shift+Tab — Move backward.
+- Delete — Remove selected item from invoice.
+- Alt+A — Add product.
+- Alt+C — Select customer.
+- Ctrl+Enter — Save invoice.
+
+Shortcuts must work consistently across the application.
+
+IMPORTANT:
+
+- Do not trigger global shortcuts while the user is typing in an input field if that would interfere with normal typing.
+- Do not override browser shortcuts unnecessarily.
+- Prevent duplicate shortcut execution.
+- Display shortcut hints in relevant screens.
+- Allow keyboard navigation through dropdowns, tables, dialogs and search results.
+- Ensure modal focus is managed correctly.
+- Esc should close the appropriate active dialog, not unexpectedly navigate away from unsaved work.
+- Ask for confirmation before discarding unsaved data.
+
+Create a command palette accessible through Ctrl+K.
+
+The command palette should allow searching for screens and actions.
+
+---
+
+# 17. NAVIGATION AND APPLICATION UI CHANGES
+
+The existing application's navigation and screen layout must be improved.
+
+Previously requested changes:
+
+### Sidebar
+
+- The hamburger menu must fully close the sidebar.
+- It must not remain partially visible or leave an unwanted blank area.
+- Improve sidebar spacing.
+- Fit sidebar options on one screen wherever practical.
+- Avoid unnecessary vertical scrolling.
+- Ensure the layout works on different screen sizes.
+- Preserve access to all application modules.
+
+### Company identity
+
+Show the selected company name in the logo area or company dropdown.
+
+The user should always be able to identify which company is currently active.
+
+### Horizontal scrolling
+
+Improve horizontal scrolling in tables and screens.
+
+Tables must not cut off important columns.
+
+Horizontal scrolling should work properly with a mouse, touchpad and touchscreen.
+
+Do not let page-level scrolling interfere with table scrolling.
+
+### Product listing
+
+As already specified:
+
+- Remove Sale Price from the main product table.
+- Remove Vehicle Fitment from the main product table.
+- Show those fields inside expandable product details.
+
+### General UI standards
+
+- Professional accounting-software design.
+- Compact and information-rich screens.
+- Clear navigation.
+- Consistent buttons.
+- Consistent form layouts.
+- Proper loading indicators.
+- Clear error messages.
+- Confirmation dialogs for important operations.
+- Responsive design.
+- Touch-friendly controls.
+- No unnecessary visual clutter.
+
+Do not make the interface overly decorative at the expense of speed and usability.
+
+---
+
+# 18. DASHBOARD AND BUSINESS ANALYTICS
+
+Create a useful accounting dashboard.
+
+Show relevant information such as:
+
+- Today's sales.
+- Today's purchases.
+- Cash balance.
+- Bank balance.
+- Customer outstanding.
+- Supplier outstanding.
+- Total receivables.
+- Total payables.
+- Current stock value.
+- Low-stock products.
+- Negative-stock products.
+- Recent sales.
+- Recent purchases.
+- Recent receipts.
+- Recent payments.
+- Pending purchase orders.
+- Pending customer payments.
+- Pending supplier payments.
+- GST summaries.
+
+Provide date filters:
+
+- Today.
+- Yesterday.
+- This week.
+- This month.
+- Current financial year.
+- Custom date range.
+
+All figures must be calculated from actual application records.
+
+Do not show hardcoded or fabricated dashboard figures.
+
+---
+
+# 19. REPORTS
+
+Implement complete reports.
+
+### Sales reports
+
+- Day-wise sales.
+- Month-wise sales.
+- Product-wise sales.
+- Customer-wise sales.
+- Brand-wise sales.
+- Vehicle-wise sales where fitment information is available.
+- Sales return report.
+- Sales register.
+- Outstanding sales invoices.
+
+### Purchase reports
+
+- Purchase register.
+- Supplier-wise purchases.
+- Product-wise purchases.
+- Brand-wise purchases.
+- Purchase return report.
+- Pending purchase orders.
+- Purchase price history.
+
+### Inventory reports
+
+- Stock summary.
+- Product-wise stock ledger.
+- Stock valuation.
+- Low-stock report.
+- Negative-stock report.
+- Fast-moving products.
+- Slow-moving products.
+- Dead-stock report.
+- Stock movement.
+- Stock adjustment.
+- Stock reconciliation.
+
+### Accounting reports
+
+- Trial balance.
+- Profit and loss account.
+- Balance sheet.
+- General ledger.
+- Customer ledger.
+- Supplier ledger.
+- Cashbook.
+- Bankbook.
+- Daybook.
+- Journal register.
+- Payment register.
+- Receipt register.
+- Debtor ageing.
+- Creditor ageing.
+
+### GST reports
+
+- Sales GST register.
+- Purchase GST register.
+- HSN summary.
+- Tax rate summary.
+- Input GST.
+- Output GST.
+- GSTR-1 supporting report.
+- GSTR-3B supporting report.
+
+Reports must support PDF, Excel and print export wherever appropriate.
+
+---
+
+# 20. DATA IMPORT AND EXPORT
+
+Support:
+
+- Excel import.
+- CSV import.
+- PDF invoice extraction.
+- Image invoice extraction.
+- BUSY Masters import.
+- BUSY Transactions import.
+- Product import.
+- Customer import.
+- Supplier import.
+- Opening balance import.
+- Stock import.
+
+The user will provide the existing product list from BUSY in Excel format.
+
+The software must use this list for product matching.
+
+Provide import preview and validation before committing imported data.
+
+For exports, support appropriate formats such as:
+
+- Excel.
+- CSV.
+- PDF.
+- BUSY-compatible formats where technically supported.
+
+Do not claim BUSY compatibility for a format that has not been validated against actual BUSY imports.
+
+---
+
+# 21. BACKUP, RESTORE AND OFFLINE OPERATION
+
+Retain and improve existing backup functionality.
+
+Support:
+
+- Manual backup.
+- Automatic backup.
+- Restore from backup.
+- Backup verification.
+- Export of company data.
+- Data integrity checks.
+
+The software must be designed to work offline for normal local accounting operations wherever the existing architecture permits.
+
+AI invoice extraction may require an internet connection.
+
+If AI services are unavailable, the user must still be able to enter purchase invoices manually.
+
+Do not make normal billing or accounting dependent on an external AI service.
+
+Protect company data and credentials.
+
+Do not expose API keys in frontend code.
+
+---
+
+# 22. DATA INTEGRITY AND AUDIT TRAIL
+
+This is essential for accounting software.
+
+Every important transaction must be traceable.
+
+Maintain:
+
+- Created date.
+- Modified date.
+- User or operator where applicable.
+- Voucher reference.
+- Source document.
+- Import batch ID where applicable.
+- Transaction status.
+- Reversal or cancellation reference.
+
+Do not silently delete posted financial transactions.
+
+Use cancellation and reversal mechanisms where appropriate.
+
+Maintain consistent stock and ledger updates.
+
+Avoid duplicate posting.
+
+Use transactions or equivalent safe persistence mechanisms for multi-step financial operations.
+
+Prevent partial updates when an operation fails.
+
+Ensure invoice totals, ledger entries, GST accounts and inventory movements remain consistent.
+
+---
+
+# 23. BUG FIXING AND IMPLEMENTATION RELIABILITY
+
+The existing software has previously experienced errors including:
+
+- `X is not defined` in Inventory screen.
+- `Search is not defined` on Dashboard.
+- `B.join is not a function` in ServiceReminderModal.
+
+These must be investigated and permanently fixed if they remain in the repository.
+
+Do not simply hide the errors.
+
+Identify the underlying cause and add appropriate safeguards and tests.
+
+The BUSY import feature has also previously failed at the file-selection and import-wizard stages.
+
+Earlier implementation attempts encountered problems involving:
+
+- Modal closing before the import workflow finished.
+- React stale-state handling.
+- Incorrect acknowledgement state.
+- Missing error information in server responses.
+- Missing navigation or file-format routing.
+- File selection appearing to complete without updating the wizard.
+- Import summaries that did not account for every source record.
+
+You must independently inspect and verify the current implementation rather than assuming earlier fixes are correct.
+
+Do not repeat these issues.
+
+### React requirements
+
+- Avoid stale state in event handlers.
+- Avoid using outdated state values immediately after setting state.
+- Keep modal lifecycle stable.
+- Do not unmount a wizard before its final step.
+- Ensure callbacks and state updates are correct.
+- Use appropriate loading and error states.
+
+### Backend requirements
+
+- Return meaningful error messages.
+- Validate all incoming data.
+- Log actual server-side failures.
+- Use correct HTTP status codes.
+- Ensure asynchronous operations complete before reporting success.
+- Avoid silent failure.
+- Do not return success before data is persisted.
+
+---
+
+# 24. TECHNICAL IMPLEMENTATION STANDARDS
+
+Follow the architecture already established by the imported repository unless a documented technical reason requires a change.
+
+Preserve existing business logic and utilities.
+
+If the existing project uses a shared GST engine, continue using it.
+
+If the project uses a particular persistence structure, understand it before modifying it.
+
+Do not create duplicate implementations of:
+
+- GST calculation.
+- Invoice totals.
+- Product matching.
+- Ledger posting.
+- Stock calculation.
+- Voucher numbering.
+- Financial-year logic.
+
+Use reusable services and components.
+
+Keep frontend, backend and accounting responsibilities properly separated.
+
+Validate all financial operations on the server, not just in the browser.
+
+Do not trust frontend-calculated amounts without backend validation.
+
+Use proper database migrations or safe data-structure upgrades where required.
+
+Preserve compatibility with existing user data.
+
+Do not delete existing records during an upgrade.
+
+---
+
+# 25. REQUIRED IMPLEMENTATION PHASES
+
+Implement the project in the following order.
+
+## Phase 1 — Repository audit and stabilization
+
+- Import GitHub repository.
+- Understand architecture.
+- Identify existing features.
+- Identify bugs.
+- Verify build.
+- Verify current functionality.
+- Prepare implementation plan.
+- Fix critical crashes.
+
+## Phase 2 — Accounting foundation
+
+- Company management.
+- Financial years.
+- Ledgers.
+- Account groups.
+- Opening balances.
+- Payments.
+- Receipts.
+- Journal.
+- Contra.
+- Daybook.
+- Trial balance.
+- Profit and loss.
+- Balance sheet.
+
+## Phase 3 — Automotive product and inventory
+
+- Automotive product master.
+- OEM and aftermarket classification.
+- Brand and manufacturer.
+- Part numbers.
+- Barcode.
+- Vehicle fitment.
+- Cross-reference.
+- Stock management.
+- Negative stock option.
+- Multi-location ON/OFF setting.
+- Stock reports.
+
+## Phase 4 — Purchase and sales
+
+- Purchase invoices.
+- Sales invoices.
+- Purchase orders.
+- Sales returns.
+- Purchase returns.
+- GST calculations.
+- Supplier and customer ledgers.
+- PDF invoices.
+- Invoice numbering.
+
+## Phase 5 — BUSY integration
+
+- Masters DAT parsing.
+- Transactions DAT parsing.
+- File upload.
+- Classification.
+- Mapping.
+- Validation.
+- Duplicate detection.
+- Financial review.
+- Import.
+- Database verification.
+- Final import report.
+
+## Phase 6 — AI purchase bill extraction
+
+- PDF and image upload.
+- OCR and AI extraction.
+- Supplier format recognition.
+- Product matching.
+- Supplier-specific learning.
+- Review screen.
+- GST validation.
+- Purchase voucher posting.
+
+## Phase 7 — POS and keyboard-first operation
+
+- Touch POS.
+- Barcode search.
+- Quick product addition.
+- Customer selection.
+- Fast billing.
+- Payment collection.
+- Keyboard shortcuts.
+- Command palette.
+
+## Phase 8 — Navigation and UI improvements
+
+- Sidebar fixes.
+- Company name in logo area.
+- Horizontal scrolling.
+- Compact product listing.
+- Expandable product details.
+- Responsive layout.
+- Touch improvements.
+
+## Phase 9 — Reports, backup and analytics
+
+- Financial reports.
+- GST reports.
+- Stock reports.
+- Sales and purchase analytics.
+- Backup and restore.
+- Data integrity verification.
+
+## Phase 10 — Final testing and release
+
+- Full application testing.
+- Accounting reconciliation.
+- GST calculation tests.
+- Import testing.
+- POS testing.
+- UI testing.
+- Regression testing.
+- Production build.
+- Final implementation report.
+
+Do not stop after generating a plan. Proceed with implementation.
+
+---
+
+# 26. MANDATORY TESTING REQUIREMENTS
+
+Test real workflows, not just isolated components.
+
+### Sales test
+
+Create a customer, create products, generate a sales invoice, receive payment and verify:
+
+- Invoice total.
+- GST.
+- Stock reduction.
+- Customer ledger.
+- Cash or bank ledger.
+- Sales ledger.
+- Outstanding balance.
+
+### Purchase test
+
+Create a supplier, create a purchase invoice and verify:
+
+- Purchase total.
+- GST input.
+- Stock increase.
+- Supplier ledger.
+- Payment.
+- Outstanding balance.
+
+### Return test
+
+Test both purchase and sales returns and verify all reversals.
+
+### Accounting test
+
+Create payment, receipt, journal and contra vouchers.
+
+Verify debit-credit balancing and ledger balances.
+
+### BUSY test
+
+Use actual BUSY Masters and Transactions export files.
+
+Verify:
+
+- File selection.
+- Upload.
+- Parsing.
+- Classification.
+- Mapping.
+- Duplicate detection.
+- Validation.
+- Import.
+- Actual database persistence.
+- Application UI refresh.
+- Final record counts.
+
+A mocked file or manually constructed JSON object is not sufficient to prove BUSY compatibility.
+
+### AI invoice test
+
+Use invoices from different suppliers with different layouts.
+
+Verify extracted fields, product matching, invoice total comparison and final purchase posting.
+
+### POS test
+
+Create a complete sales invoice using only the keyboard.
+
+Then test touch operation.
+
+### UI test
+
+Test sidebar open and close, horizontal scrolling, product expandable rows, company selection and responsive layouts.
+
+### Regression test
+
+Ensure existing features continue to work after modifications.
+
+---
+
+# 27. STRICT ACCEPTANCE CRITERIA
+
+The project is not complete until all the following are true:
+
+1. The original repository has been imported and understood.
+2. Existing working features have been preserved.
+3. The software works as an automotive spare-parts accounting system.
+4. Product master supports automotive-specific information.
+5. Inventory supports negative stock as an optional setting.
+6. Multi-location inventory can be disabled.
+7. Purchase and sales accounting work correctly.
+8. GST calculations work correctly.
+9. Ledgers, payments and receipts are properly maintained.
+10. Financial reports reconcile with accounting records.
+11. POS works with touch and keyboard.
+12. The specified keyboard shortcuts work.
+13. Navigation changes have been implemented.
+14. AI purchase invoice upload accepts PDFs and images.
+15. Different supplier invoice formats can be handled.
+16. Extracted products can be matched against the existing BUSY product list.
+17. BUSY Masters DAT files can be imported.
+18. BUSY Transactions DAT files can be imported.
+19. Unsupported BUSY records are reported, not silently ignored.
+20. Every source record is accounted for in the import summary.
+21. Imported data actually appears in the application.
+22. Duplicate imports do not create duplicate transactions.
+23. Backup and restore work.
+24. Existing bugs have been fixed.
+25. Production build completes successfully.
+26. Critical workflows pass actual end-to-end testing.
+
+---
+
+# 28. FINAL DELIVERY REPORT
+
+At the end, provide a detailed implementation report containing:
+
+### A. Repository analysis
+
+- Original repository architecture.
+- Frameworks and technologies.
+- Existing modules.
+- Existing functionality preserved.
+
+### B. Changes implemented
+
+For every module, list:
+
+- Features added.
+- Existing features modified.
+- UI changes.
+- Backend changes.
+- Database changes.
+- APIs added or modified.
+
+### C. BUSY integration report
+
+- Actual file formats tested.
+- Masters records detected.
+- Transaction records detected.
+- Records imported.
+- Records updated.
+- Records skipped.
+- Duplicates.
+- Invalid records.
+- Unsupported records.
+- Unresolved records.
+- Final reconciliation.
+
+### D. AI purchase invoice report
+
+- Supported file formats.
+- Extraction process.
+- Supplier-specific mapping.
+- Product matching.
+- Validation.
+- Posting workflow.
+
+### E. Testing report
+
+- Tests executed.
+- Tests passed.
+- Tests failed.
+- Actual end-to-end workflows verified.
+- Remaining issues.
+
+### F. Build and deployment
+
+- Production build status.
+- Required environment variables.
+- Required API keys.
+- Database setup.
+- Installation instructions.
+- Backup and restore instructions.
+- Startup instructions.
+
+Do not report a feature as completed merely because code was written.
+
+Do not report a test as passed unless it was actually executed.
+
+Clearly identify incomplete features and blockers.
+
+---
+
+# 29. MOST IMPORTANT INSTRUCTIONS
+
+1. Work directly on the imported GitHub repository.
+2. Treat this as an existing software modification project, not a fresh generic app.
+3. Preserve all existing working features.
+4. Implement actual functionality, not dummy buttons or mock screens.
+5. Keep accounting and GST calculations accurate.
+6. Keep inventory, ledgers and vouchers synchronized.
+7. Prioritize the complete BUSY import workflow and test it with actual BUSY exports.
+8. Make purchase invoice AI extraction usable with different supplier formats.
+9. Ensure the entire application is keyboard-friendly.
+10. Keep the interface compact, fast and practical for daily shop operations.
+11. Do not silently discard data.
+12. Do not silently ignore import errors.
+13. Do not fabricate test results or successful imports.
+14. Do not stop at planning, analysis or documentation.
+15. Implement, test, fix and verify the complete application.
+
+The final objective is to create a reliable, professional automotive spare-parts accounting and GST billing application by modifying the existing Free GST Billing Software repository.
+
+It should be suitable for actual daily business operations and should provide the accounting, inventory, billing, purchase, sales, reporting, POS and BUSY integration capabilities described above.
+
+**Start by importing the complete GitHub repository, auditing its existing implementation, and then proceed with the modifications.**
