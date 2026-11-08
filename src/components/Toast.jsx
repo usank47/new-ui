@@ -70,22 +70,22 @@ export default function ToastContainer() {
   };
 
   return (
-    <div className="toast-container">
+    <div className="toast-container" role="status" aria-live="polite" aria-atomic="false">
       {toasts.map(t => {
         const Icon = ICONS[t.type] || ICONS.info;
         const color = COLORS[t.type] || COLORS.info;
         return (
-          <div key={t.id} className="toast-item" style={{
+          <div key={t.id} className="toast-item" role={t.type === 'error' ? 'alert' : undefined} style={{
             background: color.bg,
             borderLeft: `4px solid ${color.icon}`,
             color: color.text
           }}>
-            <Icon size={18} style={{ color: color.icon, flexShrink: 0 }} />
+            <Icon size={18} style={{ color: color.icon, flexShrink: 0 }} aria-hidden="true" />
             <span className="toast-message">{t.message}</span>
             {t.actions?.map((a) => (a.href
               ? <a key={a.label} className="toast-action" href={a.href} target="_blank" rel="noopener noreferrer">{a.label}</a>
-              : <button key={a.label} type="button" className="toast-action" onClick={a.onClick}>{a.label}</button>))}
-            <button className="toast-close" onClick={() => dismiss(t.id)}>
+              : <button key={a.label} type="button" className="toast-action" onClick={() => { dismiss(t.id); a.onClick?.(); }}>{a.label}</button>))}
+            <button type="button" className="toast-close" onClick={() => dismiss(t.id)} aria-label="Dismiss notification">
               <X size={14} />
             </button>
           </div>

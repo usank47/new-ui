@@ -257,24 +257,101 @@ export const computeProductMargins = (product = {}) => {
   return { cost, retail, marginAmount, marginPercent, markupPercent };
 };
 
-// Automatic price selection based on Customer Type
+export const PRICE_TIERS = [
+  { id: 'retail', value: 'retail', label: 'Counter Retail', shortLabel: 'Retail', tierKey: 'sellingPrice' },
+  { id: 'mechanic', value: 'mechanic', label: 'Workshop / Mechanic', shortLabel: 'Mechanic', tierKey: 'mechanicPrice' },
+  { id: 'wholesale', value: 'wholesale', label: 'Wholesale / B2B', shortLabel: 'Wholesale', tierKey: 'wholesalePrice' },
+  { id: 'mrp', value: 'mrp', label: 'MRP Tier', shortLabel: 'MRP', tierKey: 'mrp' },
+  { id: 'special', value: 'special', label: 'Special / Contract', shortLabel: 'Special', tierKey: 'specialPrice' },
+];
+
+export const normalizePriceTier = (customerTypeOrTier = 'retail') => {
+  const raw = String(customerTypeOrTier || 'retail').trim().toLowerCase();
+  if (raw.includes('mechanic') || raw.includes('garage') || raw.includes('workshop')) return 'mechanic';
+  if (raw.includes('wholesale') || raw.includes('dealer') || raw.includes('distributor') || raw === 'b2b') return 'wholesale';
+  if (raw === 'mrp' || raw.includes('mrp') || raw.includes('list price')) return 'mrp';
+  if (raw.includes('special') || raw.includes('contract')) return 'special';
+  return 'retail';
+};
+
+// Automatic price selection based on Customer Type or Price Tier
 export const getPriceForCustomerType = (product = {}, customerType = 'Retail') => {
   const retail = num(product.sellingPrice ?? product.rate);
+  const mrp = num(product.mrp) || retail;
   const mechanic = num(product.mechanicPrice) || retail;
   const wholesale = num(product.wholesalePrice) || mechanic || retail;
   const special = num(product.specialPrice) || wholesale || retail;
-  const type = String(customerType || 'Retail').trim().toLowerCase();
+  const tierId = normalizePriceTier(customerType);
 
-  if (type === 'mechanic' || type === 'garage' || type === 'workshop') {
-    return { price: mechanic, tierLabel: 'Mechanic / Workshop Price', tierKey: 'mechanicPrice' };
+  if (tierId === 'mechanic') {
+    return { price: mechanic, tierLabel: 'Mechanic / Workshop Price', shortLabel: 'Mechanic', tierKey: 'mechanic', fieldKey: 'mechanicPrice', tierId: 'mechanic' };
   }
-  if (type === 'wholesaler' || type === 'dealer') {
-    return { price: wholesale, tierLabel: 'Wholesale / Dealer Price', tierKey: 'wholesalePrice' };
+  if (tierId === 'wholesale') {
+    return { price: wholesale, tierLabel: 'Wholesale / Dealer Price', shortLabel: 'Wholesale', tierKey: 'wholesale', fieldKey: 'wholesalePrice', tierId: 'wholesale' };
   }
-  if (type === 'special') {
-    return { price: special, tierLabel: 'Special Price', tierKey: 'specialPrice' };
+  if (tierId === 'mrp') {
+    return { price: mrp, tierLabel: 'MRP', shortLabel: 'MRP', tierKey: 'mrp', fieldKey: 'mrp', tierId: 'mrp' };
   }
-  return { price: retail, tierLabel: 'Retail Selling Price', tierKey: 'sellingPrice' };
+  if (tierId === 'special') {
+    return { price: special, tierLabel: 'Special Price', shortLabel: 'Special', tierKey: 'special', fieldKey: 'specialPrice', tierId: 'special' };
+  }
+  return { price: retail, tierLabel: 'Retail Selling Price', shortLabel: 'Retail', tierKey: 'retail', fieldKey: 'sellingPrice', tierId: 'retail' };
+};
+
+// Inspect how many catalog line items would change price under a new tier
+export const inspectTierPriceImpact = (items = [], products = [], targetTier = 'retail') => {
+  const prodById = new Map((products || []).filter(Boolean).map(p => [p.id, p]));
+  let automaticCount = 0;
+  let manualCount = 0;
+  let changedAutomaticCount = 0;
+  for (const item of items || []) {
+    if (!item || item.isCharge || !item.productId) continue;
+    const prod = prodById.get(item.productId);
+    if (!prod) continue;
+    const isManual = item.priceSource === 'manual' || item.manualRateOverride === true;
+    const { price } = getPriceForCustomerType(prod, targetTier);
+    if (isManual) {
+      manualCount += 1;
+    } else {
+      automaticCount += 1;
+      if (price > 0 && Math.abs((Number(item.rate) || 0) - price) > 0.005) {
+        changedAutomaticCount += 1;
+      }
+    }
+  }
+  return {
+    automaticCount,
+    autoUpdatableCount: changedAutomaticCount,
+    manualCount,
+    changedAutomaticCount,
+  };
+};
+
+// Apply canonical tier pricing to catalog line items while preserving manual overrides unless requested
+export const applyTierPricingToItems = (items = [], products = [], targetTier = 'retail', { replaceManual = false } = {}) => {
+  const prodById = new Map((products || []).filter(Boolean).map(p => [p.id, p]));
+  const normalizedTier = normalizePriceTier(targetTier);
+  return (items || []).map(item => {
+    if (!item || item.isCharge || !item.productId) return item;
+    const prod = prodById.get(item.productId);
+    if (!prod) return item;
+    const isManual = item.priceSource === 'manual' || item.manualRateOverride === true;
+    if (isManual && !replaceManual) {
+      return item;
+    }
+    const { price, tierLabel, shortLabel, tierKey, tierId } = getPriceForCustomerType(prod, normalizedTier);
+    if (!(price > 0) && Number(item.rate) > 0) return item;
+    return {
+      ...item,
+      rate: price,
+      priceSource: 'tier',
+      manualRateOverride: false,
+      priceTier: tierId,
+      priceTierId: tierId,
+      priceTierKey: tierKey,
+      priceTierLabel: shortLabel || tierLabel,
+    };
+  });
 };
 
 // Duplicate detection that strictly respects Brand & Manufacturer separation:

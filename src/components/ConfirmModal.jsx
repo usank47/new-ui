@@ -82,7 +82,9 @@ export default function ConfirmModalContainer() {
     return () => { dispatchFn = null; };
   }, [dispatch]);
 
-  // Autofocus the input on prompt, or the confirm button on confirm.
+  const boxRef = useRef(null);
+
+  // Autofocus the input on prompt, or Cancel when tone is danger, else the confirm button.
   useEffect(() => {
     if (!modal) {
       // Return focus to whatever was focused before the modal opened.
@@ -96,29 +98,15 @@ export default function ConfirmModalContainer() {
       if (modal.kind === 'prompt' && inputRef.current) {
         inputRef.current.focus();
         inputRef.current.select();
+      } else if (modal.tone === 'danger') {
+        const cancelBtn = boxRef.current?.querySelector('.confirm-modal-cancel') || document.querySelector('.confirm-modal-cancel');
+        cancelBtn?.focus?.();
       } else {
-        // Confirm modal — focus the primary button.
-        const btn = document.querySelector('.confirm-modal-primary');
+        const btn = boxRef.current?.querySelector('.confirm-modal-primary') || document.querySelector('.confirm-modal-primary');
         btn?.focus?.();
       }
     }, 30);
     return () => clearTimeout(t);
-  }, [modal]);
-
-  // Keyboard: Enter → confirm, Esc → cancel.
-  useEffect(() => {
-    if (!modal) return;
-    const onKey = (e) => {
-      if (e.key === 'Escape') { e.preventDefault(); cancel(); }
-      else if (e.key === 'Enter' && modal.kind === 'confirm') {
-        // Prompt handles Enter via its own form submit.
-        e.preventDefault();
-        confirm();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modal]);
 
   const cancel = useCallback(() => {
@@ -132,6 +120,38 @@ export default function ConfirmModalContainer() {
     modal.resolve(modal.kind === 'prompt' ? value : true);
     setModal(null);
   }, [modal, value]);
+
+  // Keyboard: Enter → confirm, Esc → cancel, Tab → trap focus inside dialog.
+  useEffect(() => {
+    if (!modal) return;
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+      else if (e.key === 'Tab' && boxRef.current) {
+        const focusables = Array.from(
+          boxRef.current.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')
+        );
+        if (focusables.length === 0) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      } else if (e.key === 'Enter' && modal.kind === 'confirm') {
+        // If focus is explicitly on the Cancel button, let native click fire Cancel instead of Confirm!
+        if (document.activeElement?.classList?.contains('confirm-modal-cancel')) {
+          return;
+        }
+        e.preventDefault();
+        confirm();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [modal, cancel, confirm]);
 
   if (!modal) return null;
 
@@ -151,8 +171,9 @@ export default function ConfirmModalContainer() {
       role="dialog"
       aria-modal="true"
       aria-labelledby="confirm-modal-title"
+      aria-describedby={modal.message ? 'confirm-modal-desc' : undefined}
       style={{ zIndex: 10000 }}>
-      <div className="modal-content confirm-modal-content" onClick={(e) => e.stopPropagation()}
+      <div ref={boxRef} className="modal-content confirm-modal-content" onClick={(e) => e.stopPropagation()}
         style={{ maxWidth: 440, padding: '1.5rem' }}>
         <div style={{ display: 'flex', gap: '0.9rem', alignItems: 'flex-start' }}>
           <div style={{
@@ -160,14 +181,14 @@ export default function ConfirmModalContainer() {
             background: iconBg, color: iconColor,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>
-            <Icon size={20} />
+            <Icon size={20} aria-hidden="true" />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <h3 id="confirm-modal-title" style={{ margin: 0, fontSize: '1.05rem', lineHeight: 1.35 }}>
               {modal.title}
             </h3>
             {modal.message && (
-              <p style={{ margin: '0.4rem 0 0', fontSize: '0.87rem', color: 'var(--text-muted)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+              <p id="confirm-modal-desc" style={{ margin: '0.4rem 0 0', fontSize: '0.87rem', color: 'var(--text-muted)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
                 {modal.message}
               </p>
             )}
@@ -187,7 +208,7 @@ export default function ConfirmModalContainer() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1.25rem' }}>
-          <button type="button" className="btn btn-secondary" onClick={cancel}
+          <button type="button" className="btn btn-secondary confirm-modal-cancel" onClick={cancel}
             style={{ fontSize: '0.85rem', padding: '0.5rem 1rem' }}>
             {secondaryLabel}
           </button>

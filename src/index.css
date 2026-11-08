@@ -4195,3 +4195,142 @@ tr:hover .sticky-col-right {
     grid-template-columns: 1fr 1fr;
   }
 }
+
+@media (max-width: 640px) {
+  .erp-billed-to-grid,
+  .erp-location-grid,
+  .erp-invoice-details-grid {
+    grid-template-columns: 1fr;
+  }
+  .erp-single-row-toolbar {
+    flex-wrap: wrap !important;
+    gap: 6px !important;
+  }
+}
+
+/* Validation & Price Source ERP Styles */
+.validation-summary-banner {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-left: 4px solid #dc2626;
+  color: #991b1b;
+  border-radius: 8px;
+  padding: 0.65rem 0.9rem;
+  margin-bottom: 0.55rem;
+}
+[data-theme="dark"] .validation-summary-banner {
+  background: rgba(127, 29, 29, 0.25);
+  border-color: rgba(248, 113, 113, 0.4);
+  color: #fecaca;
+}
+
+.input-invalid,
+.form-input.input-invalid {
+  border-color: #dc2626 !important;
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.14) !important;
+}
+
+.field-error-text {
+  display: block;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: #dc2626;
+  margin-top: 2px;
+  line-height: 1.25;
+}
+[data-theme="dark"] .field-error-text {
+  color: #f87171;
+}
+
+.line-item-row-invalid {
+  border-color: #fca5a5 !important;
+  background: rgba(254, 242, 242, 0.5) !important;
+}
+[data-theme="dark"] .line-item-row-invalid {
+  background: rgba(127, 29, 29, 0.14) !important;
+}
+
+.line-item-row-compact {
+  padding: 6px 8px !important;
+  margin-bottom: 4px !important;
+  border-radius: 6px !important;
+}
+.line-item-row-compact .line-item-grid {
+  gap: 6px !important;
+}
+
+.line-item-total-box {
+  background: var(--bg-secondary, #f8fafc);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 6px;
+  padding: 4px 8px;
+  min-height: 32px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  text-align: right;
+}
+.line-item-total-amount {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text, #0f172a);
+  line-height: 1.15;
+}
+.line-item-total-sub {
+  font-size: 0.64rem;
+  color: var(--text-muted, #64748b);
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.price-source-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.price-source-tier {
+  background: rgba(37, 99, 235, 0.1);
+  color: #1d4ed8;
+}
+.price-source-manual {
+  background: rgba(217, 119, 6, 0.14);
+  color: #b45309;
+}
+[data-theme="dark"] .price-source-tier {
+  background: rgba(96, 165, 250, 0.18);
+  color: #93c5fd;
+}
+[data-theme="dark"] .price-source-manual {
+  background: rgba(251, 191, 36, 0.18);
+  color: #fcd34d;
+}
+
+.erp-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text, #0f172a);
+  font-size: 0.78rem;
+  font-weight: 500;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+}
+.erp-menu-item:hover:not(:disabled) {
+  background: var(--bg-secondary, #f1f5f9);
+}
+.erp-menu-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+

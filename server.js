@@ -16,7 +16,8 @@ import { fileURLToPath } from 'url';
 import { redact } from './src/utils/errorReport.js';
 import { validateCashEntry, cleanCashEntry } from './src/utils/cashBook.js';
 import { validatePurchasePayments } from './src/utils/purchasePayments.js';
-import { templateTotals, clientYearToDate, nextCounterValue, startFor, numberSeriesFor, counterKeyFor, formatDocNumber, businessKeyOf, getFinancialYearLabel, INVOICE_TYPES } from './src/utils.js';
+import { templateTotals, clientYearToDate, nextCounterValue, startFor, numberSeriesFor, counterKeyFor, formatDocNumber, businessKeyOf, getFinancialYearLabel, INVOICE_TYPES, stockEffect, appliedStock, stockDelta } from './src/utils.js';
+import { validateInvoice } from './src/utils/invoiceValidation.js';
 import { GoogleGenAI, Type } from '@google/genai';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -291,13 +292,10 @@ app.get('/api/bills', (req, res) => {
 app.post('/api/bills', (req, res) => {
   const bill = req.body;
   if (!bill || !bill.id) return res.status(400).json({ error: 'Bill must have an id' });
-  const filePath = path.join(DATA_DIR, 'bills', safeFileName(bill.id) + '.json');
+  const billsDir = path.join(DATA_DIR, 'bills');
+  const filePath = path.join(billsDir, safeFileName(bill.id) + '.json');
+  if (!isPathInside(filePath, billsDir)) return errRes(res, 400, 'invalid-path');
 
-  // Dupe-check: the invoice-number field is free-text on the client, so a
-  // typo (INV/2026/0007 typed again for a fresh bill) would silently
-  // overwrite the previous saved bill. That's data loss. Require the
-  // client to pass ?overwrite=1 to allow it — used for edits + auto-fire
-  // re-processing. Otherwise refuse with 409 so the UI can prompt the user.
   const overwrite = req.query.overwrite === '1' || req.query.overwrite === 'true';
   if (!overwrite && fs.existsSync(filePath)) {
     return res.status(409).json({
@@ -305,8 +303,253 @@ app.post('/api/bills', (req, res) => {
       invoiceNumber: bill.id,
     });
   }
+  if (!bill.updatedAt) {
+    bill.updatedAt = new Date().toISOString();
+  }
   writeJSON(filePath, bill);
-  res.json({ success: true });
+  res.json({ success: true, updatedAt: bill.updatedAt });
+});
+
+// Transactional invoice commit endpoint:
+// Validates the invoice on the server, checks version conflicts for concurrent edits,
+// and atomically commits the bill, product stock delta, credit source bill transfers,
+// conversion source marking, and rename cleanup — rolling back every written file if any write fails.
+app.post('/api/bills/commit', (req, res) => {
+  const {
+    bill,
+    overwrite = false,
+    expectedUpdatedAt = null,
+    stockStartOverride = null,
+    creditSourcePatches = [],
+    renameFrom = null,
+    conversionSourceId = null,
+    allowNegativeStock = true,
+    skipStockDeduction = false,
+  } = req.body || {};
+
+  if (!bill || typeof bill !== 'object' || !bill.id || typeof bill.id !== 'string') {
+    return res.status(400).json({ error: 'Bill must have a valid id', code: 'bad-request' });
+  }
+
+  const billsDir = path.join(DATA_DIR, 'bills');
+  const filePath = path.join(billsDir, safeFileName(bill.id) + '.json');
+  if (!isPathInside(filePath, billsDir)) return errRes(res, 400, 'invalid-path');
+
+  const existingBill = readJSON(filePath, null);
+  if (!overwrite && existingBill) {
+    return res.status(409).json({
+      error: 'A bill with this invoice number already exists',
+      code: 'duplicate-number',
+      invoiceNumber: bill.id,
+    });
+  }
+
+  // Concurrent edit conflict detection when expectedUpdatedAt is supplied
+  if (overwrite && existingBill && expectedUpdatedAt && existingBill.updatedAt && existingBill.updatedAt !== expectedUpdatedAt) {
+    return res.status(409).json({
+      error: 'This invoice was modified in another tab or window. Reload to see the latest version.',
+      code: 'version-conflict',
+      serverUpdatedAt: existingBill.updatedAt,
+    });
+  }
+
+  // Rename safety check: ensure old bill's credit wasn't used by another invoice
+  let oldRenamedBill = null;
+  let oldRenamedPath = null;
+  if (renameFrom && renameFrom !== bill.id) {
+    oldRenamedPath = path.join(billsDir, safeFileName(renameFrom) + '.json');
+    if (!isPathInside(oldRenamedPath, billsDir)) return errRes(res, 400, 'invalid-path');
+    const deps = findCreditDependents(renameFrom);
+    if (deps.length > 0) {
+      return res.status(409).json({
+        error: `${renameFrom} cannot be renumbered because its overpayment credit was applied to ${deps[0].invoiceNumber || deps[0].id}.`,
+        code: 'client-credit-dependency',
+        dependents: deps,
+      });
+    }
+    oldRenamedBill = readJSON(oldRenamedPath, null);
+  }
+
+  const baselineBillForStock = existingBill
+    || oldRenamedBill
+    || (stockStartOverride && typeof stockStartOverride === 'object' ? { data: { stockApplied: stockStartOverride }, status: bill.status } : null);
+
+  // Server-side validation of invoice fields and aggregated stock demand
+  const allProducts = readAllFromDir('products');
+  const metaPath = path.join(DATA_DIR, 'meta.json');
+  const metaData = readJSON(metaPath, {});
+  const effectiveAllowNeg = allowNegativeStock !== false && (metaData?.inventorySettings?.allowNegativeStock !== false);
+
+  if (bill.data && Array.isArray(bill.data.items) && bill.status !== 'cancelled') {
+    const validation = validateInvoice({
+      profile: bill.data.profile || {},
+      client: bill.data.client || { name: bill.clientName || '' },
+      details: bill.data.details || { invoiceNumber: bill.invoiceNumber, invoiceDate: bill.invoiceDate },
+      items: bill.data.items,
+      totals: bill.data.totals || null,
+      invoiceType: bill.invoiceType || bill.data.invoiceType || 'tax-invoice',
+      invoiceOptions: bill.data.invoiceOptions || {},
+      taxInclusive: Boolean(bill.data.taxInclusive),
+      products: allProducts,
+      inventorySettings: { allowNegativeStock: effectiveAllowNeg },
+      editingBill: baselineBillForStock,
+    });
+    if (!validation.valid) {
+      return res.status(400).json({
+        error: validation.firstError || 'Invoice validation failed.',
+        errors: validation.errors,
+        code: 'validation-failed',
+      });
+    }
+  }
+
+  const nowIso = new Date().toISOString();
+  const stockFrom = baselineBillForStock ? appliedStock(baselineBillForStock) : {};
+  const isConvertedSource = Boolean(bill.convertedTo || bill.data?.convertedTo);
+  const targetStockApplied = isConvertedSource
+    ? {}
+    : stockEffect(bill.data?.items || [], bill.invoiceType || 'tax-invoice', bill.status || 'unpaid');
+  const deltaChanges = skipStockDeduction ? {} : stockDelta(stockFrom, targetStockApplied);
+
+  let productMoves = [];
+  try {
+    productMoves = stockMoves(deltaChanges, true);
+  } catch (err) {
+    return res.status(err?.status || 400).json({ error: err?.code || 'Invalid stock movement', code: 'stock-error' });
+  }
+
+  const stampedBill = {
+    ...bill,
+    updatedAt: nowIso,
+    data: bill.data ? {
+      ...bill.data,
+      stockApplied: targetStockApplied,
+    } : bill.data,
+  };
+
+  // Stage all file mutations with before-snapshots so any error rolls back all files
+  const stagedWrites = []; // { file, beforeExists, beforeData, afterData, isDelete, trashPath }
+
+  for (const m of productMoves) {
+    stagedWrites.push({
+      file: m.file,
+      beforeExists: true,
+      beforeData: m.before,
+      afterData: m.after,
+    });
+  }
+
+  // Stage credit source bill patches (idempotent against duplicate creditTargetBillId)
+  if (Array.isArray(creditSourcePatches)) {
+    for (const patch of creditSourcePatches) {
+      const srcId = patch?.billId || patch?.updatedBill?.id;
+      if (!srcId || !patch?.updatedBill) continue;
+      const srcPath = path.join(billsDir, safeFileName(srcId) + '.json');
+      if (!isPathInside(srcPath, billsDir)) return errRes(res, 400, 'invalid-path');
+      const liveSrc = readJSON(srcPath, null);
+      if (!liveSrc) continue;
+      const alreadyApplied = (liveSrc.payments || []).some(
+        p => p?.mode === 'credit-transferred-out' && p?.creditTargetBillId === bill.id
+      );
+      if (alreadyApplied) continue;
+      stagedWrites.push({
+        file: srcPath,
+        beforeExists: true,
+        beforeData: liveSrc,
+        afterData: {
+          ...patch.updatedBill,
+          updatedAt: nowIso,
+        },
+      });
+    }
+  }
+
+  // Stage conversion source marking
+  if (conversionSourceId && conversionSourceId !== bill.id) {
+    const convPath = path.join(billsDir, safeFileName(conversionSourceId) + '.json');
+    if (isPathInside(convPath, billsDir)) {
+      const liveConv = readJSON(convPath, null);
+      if (liveConv && !liveConv.convertedTo) {
+        stagedWrites.push({
+          file: convPath,
+          beforeExists: true,
+          beforeData: liveConv,
+          afterData: {
+            ...liveConv,
+            convertedTo: bill.id,
+            updatedAt: nowIso,
+            ...(liveConv.data ? { data: { ...liveConv.data, stockApplied: {} } } : {}),
+          },
+        });
+      }
+    }
+  }
+
+  // Stage primary bill write
+  stagedWrites.push({
+    file: filePath,
+    beforeExists: Boolean(existingBill),
+    beforeData: existingBill,
+    afterData: stampedBill,
+  });
+
+  // Execute staged writes atomically with full rollback on failure
+  const completedWrites = [];
+  let trashedRename = null;
+  try {
+    for (const op of stagedWrites) {
+      if (op.afterData?._simulateWriteFailure) {
+        throw new Error('Simulated write failure during atomic commit');
+      }
+      writeJSON(op.file, op.afterData);
+      completedWrites.push(op);
+    }
+
+    if (oldRenamedPath && oldRenamedBill && fs.existsSync(oldRenamedPath)) {
+      const trashDir = path.join(DATA_DIR, 'trash');
+      if (!fs.existsSync(trashDir)) fs.mkdirSync(trashDir, { recursive: true });
+      const trashDest = path.join(trashDir, path.basename(oldRenamedPath));
+      const clearedOld = {
+        ...oldRenamedBill,
+        updatedAt: nowIso,
+        ...(oldRenamedBill.data ? { data: { ...oldRenamedBill.data, stockApplied: {} } } : {}),
+      };
+      writeJSON(oldRenamedPath, clearedOld);
+      fs.renameSync(oldRenamedPath, trashDest);
+      trashedRename = { from: oldRenamedPath, to: trashDest, originalData: oldRenamedBill };
+    }
+
+    invalidateCache('bills');
+    invalidateCache('products');
+    res.json({
+      success: true,
+      bill: stampedBill,
+      updatedAt: nowIso,
+      stockDelta: deltaChanges,
+      movedProducts: productMoves.map(m => m.after),
+    });
+  } catch (err) {
+    // Roll back in reverse order
+    if (trashedRename) {
+      try {
+        if (fs.existsSync(trashedRename.to)) fs.unlinkSync(trashedRename.to);
+        writeJSON(trashedRename.from, trashedRename.originalData);
+      } catch { /* ignore */ }
+    }
+    for (let i = completedWrites.length - 1; i >= 0; i--) {
+      const op = completedWrites[i];
+      try {
+        if (op.beforeExists && op.beforeData) {
+          writeJSON(op.file, op.beforeData);
+        } else {
+          deleteFile(op.file);
+        }
+      } catch { /* ignore */ }
+    }
+    invalidateCache('bills');
+    invalidateCache('products');
+    errRes(res, 500, 'server-error', err);
+  }
 });
 
 // v1.10.31 — Data-F9.1: block deletion of a bill that's a client-credit

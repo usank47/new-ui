@@ -7,7 +7,7 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 export default defineConfig([
   // Build output and generated / copied files, as in .gitignore: linting them
   // buried the real problems under ~2,000 errors from minified code.
-  globalIgnores(['dist', 'release-build', 'public/tesseract', 'docs-site/out', '.claude', 'data']),
+  globalIgnores(['dist', 'release-build', 'public/tesseract', 'docs-site/out', '.claude', 'data', '.backups']),
   {
     files: ['**/*.{js,jsx}'],
     extends: [

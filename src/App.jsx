@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from 'react';
 import { Home, FileText, Settings, Plus, Users, Package, BarChart3, Wallet, RefreshCw, Receipt, BookOpen, Moon, Sun, Download, X, ShoppingCart, ChevronDown, Building2, Pencil, HelpCircle, Search, Command, Bell, Calculator, HardDrive, Menu, Heart, Banknote, Laptop, Landmark, FileSpreadsheet } from 'lucide-react';
 import { getAllProfiles, saveProfile, getEnabledModules, getMenuOrder, onMenuChanged, getAllBills, getAllProducts, getStockAlertSettings, getAllClients, getAllSuppliers, getAllLedgers, runUpdateNow, getLockStatus } from './store';
 import { isModuleEnabled, getUpcomingFilings, countsAsSales, localToday, toLocalIsoDate, DOCS_URL, findLowStock, trackedStock } from './utils';
@@ -64,26 +64,34 @@ function App() {
   const [showWizard, setShowWizard] = useState(() => {
     try { return !getPrintSettings().onboardingComplete; } catch { return false; }
   });
-  const [currentView, setCurrentView] = useState(() => {
-    // PWA manifest "shortcuts" deep-link in via ?view=X (e.g. right-clicking
-    // the pinned taskbar icon → "New Invoice" opens /?view=new). Honour that
-    // before falling back to whatever the user was last looking at.
+  const [currentView, setCurrentViewRaw] = useState(() => {
     try {
       const params = new URLSearchParams(window.location.search);
       const v = params.get('view');
-      // v1.10.74 - 'controlpanel' added so ?view=controlpanel deep links work too.
       const valid = ['dashboard', 'new', 'pos', 'clients', 'inventory', 'accounting', 'expenses', 'purchases', 'recurring', 'receipts', 'cashbook', 'reports', 'filing', 'incometax', 'settings', 'controlpanel', 'support'];
       if (v && valid.includes(v)) {
-        // Strip the query string so a refresh doesn't keep snapping back to
-        // the shortcut target — only the *first* navigation honours it.
         window.history.replaceState({}, '', window.location.pathname);
         return v;
       }
     } catch { /* sandboxed history API — fall through */ }
-    // 'guide' was the built-in User Guide (removed in v1.10.75).
     const last = sessionStorage.getItem('gst_currentView');
     return last && last !== 'guide' ? last : 'dashboard';
   });
+  const invoiceNavGuardRef = useRef(null);
+  const runWithInvoiceGuard = useCallback((action) => {
+    if (currentView === 'new' && typeof invoiceNavGuardRef.current === 'function') {
+      invoiceNavGuardRef.current(action);
+      return;
+    }
+    action();
+  }, [currentView]);
+  const setCurrentView = useCallback((nextView, opts = {}) => {
+    if (!opts?.bypassGuard && currentView === 'new' && nextView !== 'new' && typeof invoiceNavGuardRef.current === 'function') {
+      invoiceNavGuardRef.current(() => setCurrentViewRaw(nextView));
+      return;
+    }
+    setCurrentViewRaw(nextView);
+  }, [currentView]);
   const [showBusyModal, setShowBusyModal] = useState(false);
   const [profile, setProfile] = useState(null);
   // v1.10.83 - the menu's own name and logo, as last shown (see `brand` below).
@@ -413,12 +421,14 @@ function App() {
     return () => document.removeEventListener('mousedown', handler);
   }, [showProfileMenu]);
 
-  const handleSwitchProfile = async (bp) => {
+  const handleSwitchProfile = (bp) => {
     setShowProfileMenu(false);
-    const loaded = { ...bp };
-    delete loaded.id;
-    await saveProfile(loaded);
-    setProfile(loaded);
+    runWithInvoiceGuard(async () => {
+      const loaded = { ...bp };
+      delete loaded.id;
+      await saveProfile(loaded);
+      setProfile(loaded);
+    });
   };
 
   const businessKey = String(profile?.gstin || profile?.businessName || '').trim().toUpperCase();
@@ -433,44 +443,55 @@ function App() {
   const [sidebarAutoHide] = useState(() => {
     try { return localStorage.getItem('freegstbill_sidebarAutoHide') === '1'; } catch { return false; }
   });
-  const handleNewInvoice = () => {
+  const startFreshNewInvoice = useCallback(() => {
     setEditorKey((k) => k + 1);
     sessionStorage.removeItem('gst_invoiceDraft');
     setEditingBill(null);
-    setCurrentView('new');
+    setCurrentViewRaw('new');
+  }, []);
+  const handleNewInvoice = () => {
+    runWithInvoiceGuard(startFreshNewInvoice);
   };
 
   const handleEditInvoice = (bill) => {
-    setEditorKey((k) => k + 1);
-    sessionStorage.removeItem('gst_invoiceDraft');
-    setEditingBill(bill);
-    setCurrentView('new');
+    runWithInvoiceGuard(() => {
+      setEditorKey((k) => k + 1);
+      sessionStorage.removeItem('gst_invoiceDraft');
+      setEditingBill(bill);
+      setCurrentViewRaw('new');
+    });
   };
 
   const handlePrintInvoice = (bill) => {
-    setEditorKey((k) => k + 1);
-    sessionStorage.removeItem('gst_invoiceDraft');
-    setEditingBill({ ...bill, _printOnOpen: true });
-    setCurrentView('new');
+    runWithInvoiceGuard(() => {
+      setEditorKey((k) => k + 1);
+      sessionStorage.removeItem('gst_invoiceDraft');
+      setEditingBill({ ...bill, _printOnOpen: true });
+      setCurrentViewRaw('new');
+    });
   };
 
   const handleDuplicateInvoice = (bill) => {
-    setEditorKey((k) => k + 1);
-    sessionStorage.removeItem('gst_invoiceDraft');
-    const clone = JSON.parse(JSON.stringify(bill));
-    clone._isDuplicate = true;
-    setEditingBill(clone);
-    setCurrentView('new');
+    runWithInvoiceGuard(() => {
+      setEditorKey((k) => k + 1);
+      sessionStorage.removeItem('gst_invoiceDraft');
+      const clone = JSON.parse(JSON.stringify(bill));
+      clone._isDuplicate = true;
+      setEditingBill(clone);
+      setCurrentViewRaw('new');
+    });
   };
 
   const handleConvertToInvoice = (bill) => {
-    setEditorKey((k) => k + 1);
-    sessionStorage.removeItem('gst_invoiceDraft');
-    const clone = JSON.parse(JSON.stringify(bill));
-    clone._isDuplicate = true;
-    clone._convertToType = 'tax-invoice';
-    setEditingBill(clone);
-    setCurrentView('new');
+    runWithInvoiceGuard(() => {
+      setEditorKey((k) => k + 1);
+      sessionStorage.removeItem('gst_invoiceDraft');
+      const clone = JSON.parse(JSON.stringify(bill));
+      clone._isDuplicate = true;
+      clone._convertToType = 'tax-invoice';
+      setEditingBill(clone);
+      setCurrentViewRaw('new');
+    });
   };
 
   const enabledModules = getEnabledModules();
@@ -1556,7 +1577,9 @@ function App() {
             {currentView === 'new' && (
               <InvoiceGenerator
                 key={editorKey}
-                onBack={() => { setEditingBill(null); setCurrentView('dashboard'); }}
+                onBack={() => { setEditingBill(null); setCurrentViewRaw('dashboard'); }}
+                onCreateNextInvoice={startFreshNewInvoice}
+                onRegisterNavGuard={(fn) => { invoiceNavGuardRef.current = fn; }}
                 profile={profile}
                 editingBill={editingBill}
                 onOpenSeriesModal={() => setShowSeriesModal(true)}

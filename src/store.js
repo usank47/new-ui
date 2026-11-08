@@ -322,6 +322,10 @@ export const saveBill = async (bill, { overwrite = false } = {}) => {
   return apiFetch(`${API}/bills${qs}`, { method: 'POST', body: JSON.stringify(bill) });
 };
 
+export const commitBillTransaction = async (payload) => {
+  return apiFetch(`${API}/bills/commit`, { method: 'POST', body: JSON.stringify(payload) });
+};
+
 export const getAllBills = async () => {
   return apiFetch(`${API}/bills`);
 };
