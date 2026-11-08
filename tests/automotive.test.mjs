@@ -6,13 +6,20 @@ import {
   computeProductMargins,
   normalizeAutomotiveProduct,
   matchProductToMaster,
+  decodeHtmlEntities,
+  quarantineNonStockProducts,
 } from '../src/utils/products.js';
 import {
   buildDoubleEntryBook,
   ACCOUNT_GROUPS,
   VOUCHER_TYPES,
   SYSTEM_LEDGERS,
+  computeBrsSummary,
 } from '../src/utils/accounting.js';
+import {
+  formatSeriesNumber,
+  DEFAULT_INVOICE_SERIES,
+} from '../src/utils/invoiceSeries.js';
 import {
   parseBusyFileRecords,
   reconcileBusyImport,
@@ -280,5 +287,65 @@ test('BUSY Accounting: Tax/Expense Ledgers (Add. Cess on GST Input/Output) are N
   assert.equal(recon.staged.products[0].oemPartNo, '23265M79F00');
   assert.equal(recon.staged.ledgers.length, 3, 'All 3 Add. Cess accounts must be staged in ledgers');
 });
+
+test('Enterprise Hygiene: Multi-Pass HTML Entity Decoding & BUSY .DAT Quarantine', () => {
+  assert.equal(decodeHtmlEntities('Advertisement &amp; Publicity'), 'Advertisement & Publicity');
+  assert.equal(decodeHtmlEntities('Advertisement &amp;amp; Publicity'), 'Advertisement & Publicity');
+  assert.equal(decodeHtmlEntities('Clutch &amp; Transmission'), 'Clutch & Transmission');
+
+  const mixedCatalog = [
+    { id: 'p1', name: 'Add. Cess Adjustable Agnst. Advance', stock: 0, sellingPrice: 0 },
+    { id: 'p2', name: 'Add. Cess on GST Input', stock: 0, sellingPrice: 0 },
+    { id: 'p3', name: 'Add. Cess on GST Output', stock: 0, sellingPrice: 0 },
+    { id: 'p4', name: 'Advertisement &amp; Publicity', stock: 0, sellingPrice: 0 },
+    { id: 'p5', name: 'Bosch Spark Plug Set', oemPartNo: 'SP-101', stock: 12, sellingPrice: 480 },
+  ];
+
+  const { stockProducts, quarantinedLedgers } = quarantineNonStockProducts(mixedCatalog);
+  assert.equal(stockProducts.length, 1, 'Only genuine spare part remains in stockProducts');
+  assert.equal(stockProducts[0].name, 'Bosch Spark Plug Set');
+  assert.equal(quarantinedLedgers.length, 4, 'All 4 misclassified accounting heads are quarantined');
+  assert.equal(quarantinedLedgers[0].suggestedGroup, 'Duties & Taxes');
+  assert.equal(quarantinedLedgers[3].name, 'Advertisement & Publicity');
+  assert.equal(quarantinedLedgers[3].suggestedGroup, 'Indirect Expenses');
+});
+
+test('Enterprise ERP: CGST Rule 46 Invoice Series, BRS Math & Standardized F4-F9 Shortcuts', () => {
+  assert.equal(DEFAULT_INVOICE_SERIES.length, 5, 'Should pre-configure 5 standard series ([MA], [B2B], [POS], [IGST], [EST])');
+  const preview = formatSeriesNumber({ prefix: 'JPR/', suffix: '/26-27', padding: 4, nextNumber: 1 });
+  assert.equal(preview, 'JPR/0001/26-27');
+  assert.ok(preview.length <= 16, 'Must comply with CGST Rule 46 max 16-char limit');
+
+  // Verify standardized F4-F9 shortcuts
+  const byId = Object.fromEntries(VOUCHER_TYPES.map(v => [v.id, v.shortcut]));
+  assert.equal(byId.Contra, 'F4');
+  assert.equal(byId.Payment, 'F5');
+  assert.equal(byId.Receipt, 'F6');
+  assert.equal(byId.Journal, 'F7');
+  assert.equal(byId.Sales, 'F8');
+  assert.equal(byId.Purchase, 'F9');
+
+  // Verify Native Bank Reconciliation (BRS) math
+  const bankAccount = {
+    id: 'sys_bank',
+    name: 'PRAGYAN ENTERPRISES INDUSIND',
+    group: 'Bank Accounts',
+    signedClosing: 100000, // ₹1,00,000 Dr
+    postings: [
+      { id: 'post_dep_1', debit: 25000, credit: 0 }, // Uncleared deposit of ₹25,000
+      { id: 'post_chq_1', debit: 0, credit: 10000 }, // Unpresented cheque of ₹10,000
+      { id: 'post_clr_1', debit: 15000, credit: 0 }, // Cleared deposit
+    ],
+  };
+  const brs = computeBrsSummary(bankAccount, { post_clr_1: '2026-11-05' });
+  assert.equal(brs.companyBalance, 100000);
+  assert.equal(brs.companyType, 'Dr');
+  assert.equal(brs.unclearedDeposits, 25000);
+  assert.equal(brs.unpresentedPayments, 10000);
+  // Bank Statement = 1,00,000 + 10,000 (unpresented cheques) - 25,000 (uncleared deposits) = 85,000 Dr
+  assert.equal(brs.bankStatementBalance, 85000);
+  assert.equal(brs.bankStatementType, 'Dr');
+});
+
 
 

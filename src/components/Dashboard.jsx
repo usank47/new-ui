@@ -1,8 +1,10 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { FileText, Trash2, Plus, IndianRupee, Receipt, Edit3, TrendingUp, Search, Copy, X, CheckCircle, Clock, AlertTriangle, MessageCircle, Mail, StickyNote, Send, Package, Download, Printer, Ban, Undo2, Eye, QrCode, Upload } from 'lucide-react';
+import { FileText, Trash2, Plus, IndianRupee, Receipt, Edit3, TrendingUp, Search, Copy, X, CheckCircle, Clock, AlertTriangle, MessageCircle, Mail, StickyNote, Send, Package, Download, Printer, Ban, Undo2, Eye, QrCode, Upload, Landmark } from 'lucide-react';
 import HelpButton from './HelpButton';
-import { getAllBills, saveBill, getAllProducts, applyStockChanges, getProfile, getAllClients, getStockAlertSettings, saveReceipt, deleteReceipt, getAllReceipts, markSavedPdfCancelled, getEnabledModules } from '../store';
+import { getAllBills, saveBill, getAllProducts, applyStockChanges, getProfile, getAllClients, getAllSuppliers, getAllLedgers, getAllPurchases, getAllExpenses, getAllCashEntries, getAllVouchers, getStockAlertSettings, saveReceipt, deleteReceipt, getAllReceipts, markSavedPdfCancelled, getEnabledModules } from '../store';
 import { formatCurrency, INVOICE_TYPES, getFYOptions, numberToWords, belongsToProfile, salesSign, isCancelledBill, markPaidPatch, markUnpaidPatch, stockEffect, appliedStock, stockDelta, SALES_INVOICE_TYPES, localToday, amountDue, paymentStatusFor, isModuleEnabled, TDS_SECTIONS, findLowStock, trackedStock } from '../utils';
+import { buildDoubleEntryBook, formatIndianNumber } from '../utils/accounting';
+import { quarantineNonStockProducts } from '../utils/products';
 import { billInInr, billCurrency as fxBillCurrency, baseCurrencyOf } from '../utils/fx';
 import { withClientTds } from '../utils/tdsTcs';
 import { prepareEInvoices, parseIrpResponse, matchIrnEntries, downloadJson, einvoiceFileName } from '../utils/einvoice';
@@ -221,32 +223,9 @@ const foreignReceiptFields = (input) => {
   };
 };
 
-export default function Dashboard({ onNew, onEdit, onPrint, onDuplicate, onConvert, onOpenProducts, onOpenSettings, onOpenGuide, onOpenSupport, activeProfile }) {
-  // v1.10.64 — requested (#55, @sangwanmail-eng): "An invoice belonging to one
-  // company should not appear under the other."
-  //
-  // Bills and the active business load independently, so filtering at load
-  // time would race — whichever arrived second would be ignored. Instead the
-  // raw list is held and the visible list derived, which stays correct when
-  // either changes, including when the user switches business from the
-  // header without a reload.
-  //
-  // Anything that cannot be attributed to a business is SHOWN, never hidden.
-  // See belongsToProfile() in utils.js for why that matters here.
+export default function Dashboard({ onNew, onEdit, onPrint, onDuplicate, onConvert, onOpenProducts, onOpenSettings, onOpenGuide, onOpenSupport, onOpenAccounting, activeProfile }) {
   const [allBills, setBills] = useState([]);
   const [profileState, setProfileState] = useState(null);
-
-  // v1.10.65 — requested (#58 item 1, @sangwanmail-eng): "Dashboard should
-  // refresh automatically after company switch."
-  //
-  // It did not, because the dashboard fetched the business ONCE when it
-  // mounted. Switching business from the header updated the app, but this
-  // screen never heard about it and kept showing the previous company's
-  // invoices until a manual reload.
-  //
-  // The live value is now passed in as a prop, so a switch re-filters
-  // immediately. The locally fetched copy stays as a fallback for the first
-  // paint, before the prop has arrived.
   const profile = activeProfile ?? profileState;
 
   const bills = useMemo(
@@ -254,17 +233,8 @@ export default function Dashboard({ onNew, onEdit, onPrint, onDuplicate, onConve
     [allBills, profile],
   );
   const [filtered, setFiltered] = useState([]);
-  // v1.10.66 (#64 item 3) — the headline cards are computed from `bills`, the
-  // list already narrowed to the active business. They used to be summed in
-  // loadBills() from the raw server response, so Total Invoiced, Tax Collected,
-  // Outstanding and the invoice count added up EVERY company's invoices while
-  // the table underneath showed only one.
   const baseCur = baseCurrencyOf(profile);
   const stats = useMemo(() => {
-    // v1.10.67 (#66 item 7, @sangwanmail-eng) — these cards are turnover, so
-    // only real sales count. A proforma is a quote, a delivery challan moves
-    // goods without selling them, a credit note takes money back, and a
-    // cancelled document counts for nothing.
     const byCurrency = {};
     let count = 0;
     for (const b of bills) {
@@ -277,8 +247,6 @@ export default function Dashboard({ onNew, onEdit, onPrint, onDuplicate, onConve
       byCurrency[cur].tax += sign * (b.totalTaxAmount || 0);
       if (sign > 0 && b.status !== 'paid') byCurrency[cur].unpaid += Math.max(0, amountDue(b) - (b.paidAmount || 0));
     }
-    // v1.10.83 - more than one currency: the total in rupees too, each
-    // invoice at its own exchange rate (one without a rate is counted apart).
     let inBase = 0, noRate = 0;
     if (Object.keys(byCurrency).length > 1) {
       for (const b of bills) {
@@ -296,25 +264,15 @@ export default function Dashboard({ onNew, onEdit, onPrint, onDuplicate, onConve
   const [fyFilter, setFyFilter] = useState('all');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
-  // v1.10.83 (#112) - '' = all; see utils/costCentres.js.
   const [centreFilter, setCentreFilter] = useState('');
   const { on: ccOn, centres } = useCostCentres(profile);
-  // Bulk-selection state. Stores a Set of bill IDs (not the bills themselves)
-  // so we don't hold stale references when the underlying bill is edited
-  // elsewhere. Cleared whenever filters change so the user doesn't accidentally
-  // bulk-act on bills they can no longer see.
   const [selectedIds, setSelectedIds] = useState(() => new Set());
-  // v1.10.74 - the comment above was never wired up, so bulk actions could hit
-  // ticked rows hidden by a filter. Reset during render (React's "adjust state
-  // on prop change" pattern) when any filter changes.
   const filterKey = [search, typeFilter, statusFilter, fyFilter, dateFrom, dateTo, centreFilter].join('|');
   const [selectionFilterKey, setSelectionFilterKey] = useState(filterKey);
   if (selectionFilterKey !== filterKey) {
     setSelectionFilterKey(filterKey);
     if (selectedIds.size) setSelectedIds(new Set());
   }
-  // v1.9.4 — column picker. Persist to localStorage. Default set matches
-  // the pre-v1.9.4 hardcoded columns so no visual change on upgrade.
   const [visibleColumns, setVisibleColumns] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('gst_dashboardColumns') || 'null');
@@ -331,56 +289,37 @@ export default function Dashboard({ onNew, onEdit, onPrint, onDuplicate, onConve
   }, [visibleColumns]);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [paymentModal, setPaymentModal] = useState(null);
-  // v1.10.80 (#100) - the invoice shown read-only by the View button.
   const [viewBill, setViewBill] = useState(null);
-  // v1.10.83 (#111) - e-invoicing: problems after an export, results after an IRN import.
   const einvoiceOn = isModuleEnabled('einvoice', getEnabledModules());
   const [einvReport, setEinvReport] = useState(null);
   const irnFileRef = useRef(null);
-  // v1.10.9 — receipt modal state. Opens automatically after
-  // recordPayment succeeds; can also be opened via openReceiptFor(...)
-  // for reprints.
-  const [receiptTarget, setReceiptTarget] = useState(null); // { bill, payment, remaining }
-
-  // v1.10.13 — full-edit payment modal. { bill, idx, form: { amount, date, mode, note } }
+  const [receiptTarget, setReceiptTarget] = useState(null);
   const [editPaymentModal, setEditPaymentModal] = useState(null);
   const [paymentInput, setPaymentInput] = useState({ amount: '', date: '', mode: 'bank-transfer', note: '' });
   const [showRemindAll, setShowRemindAll] = useState(false);
   const [clients, setClients] = useState([]);
-  const [productCount, setProductCount] = useState(null);   // null = not loaded yet
+  const [productCount, setProductCount] = useState(null);
   const [guideDismissed, setGuideDismissed] = useState(() => {
     try { return localStorage.getItem('freegstbill_startedDismissed') === '1'; } catch { return false; }
   });
   const [lowStockProducts, setLowStockProducts] = useState([]);
+  const [accountingInputs, setAccountingInputs] = useState({
+    ledgers: [],
+    suppliers: [],
+    purchases: [],
+    expenses: [],
+    receipts: [],
+    cashEntries: [],
+    vouchers: [],
+    products: [],
+  });
 
-  // v1.10.4 — audit M14. getFYOptions is date-based (only changes across
-  // April-1 boundary); memoize with an empty dep so we run it once per
-  // component mount, not on every render.
   const fyOptions = useMemo(() => getFYOptions(), []);
 
   const loadBills = async () => {
     try {
       const data = await getAllBills();
-      // Local date (toISOString() is UTC: still yesterday in India until 05:30).
       const today = localToday();
-
-      // v1.10.41 — Orphaned-payment reconciliation. Reported: user
-      // recorded a payment in an older version — the receipt file
-      // exists on disk (Receipts page shows it) but the bill's
-      // paidAmount stayed at 0 and Dashboard showed the invoice as
-      // Overdue with PAID = "—". Root cause was cross-file data
-      // drift: receipts persist in data/receipts/*.json with a
-      // billId reference; bills persist in data/bills/*.json with
-      // their own payments[] array. If a save regression or stale
-      // editingBill overwrite ever emptied the bill's payments,
-      // the receipt survived but the linkage was lost.
-      //
-      // Reconciliation: for every receipt with a bill reference,
-      // check if the bill's payments array contains a matching
-      // entry (by receiptNo or by amount+date+mode). If not, merge
-      // it back and re-save the bill. Runs once per Dashboard mount,
-      // catches this whole class of orphaned-payment bugs
-      // retroactively, and silently no-ops in the healthy case.
       let reconciled = 0;
       try {
         const receipts = await getAllReceipts().catch(() => []);
@@ -393,21 +332,12 @@ export default function Dashboard({ onNew, onEdit, onPrint, onDuplicate, onConve
         }
         const reconcileWrites = [];
         for (const bill of data) {
-          // v1.10.66 (#64) — only a receipt from the business that raised the
-          // invoice may repair it. Two businesses can share an invoice number,
-          // and matching on the number alone posted one company's payment onto
-          // the other company's invoice every time the Dashboard opened.
-          // Receipts saved before businesses were separated carry no business
-          // and still match, as before.
           const rcpts = (receiptsByBillKey.get(bill.id) || receiptsByBillKey.get(bill.invoiceNumber) || [])
             .filter(r => belongsToProfile(bill, { gstin: r.ownerGstin, businessName: r.ownerName }));
           if (!rcpts.length) continue;
           const currentPayments = Array.isArray(bill.payments) ? bill.payments : [];
           const missing = rcpts.filter(r => {
-            // Match by receiptNo (post-v1.10.10 payments store the receipt no),
-            // OR by amount+date signature for pre-v1.10.10 payments.
             return !currentPayments.some(p =>
-              // Receipts made from a payment carry the payment's id.
               (r.id && p.id === r.id)
               || (r.receiptNo && p.receiptNo === r.receiptNo)
               || (Math.abs((Number(p.amount) || 0) - (Number(r.amount) || 0)) < 0.005
@@ -427,11 +357,7 @@ export default function Dashboard({ onNew, onEdit, onPrint, onDuplicate, onConve
             receiptNo: r.receiptNo,
           }))];
           const totalPaid = merged.reduce((s, p) => s + (Number(p.amount) || 0), 0);
-          // A cancelled invoice stays cancelled: restoring a payment must not
-          // bring it back into totals and GST returns without its stock.
           const nextStatus = isCancelledBill(bill) ? 'cancelled' : paymentStatusFor(bill, totalPaid);
-          // Mutate the in-memory bill so setBills(data) below shows the
-          // reconciled value immediately; also queue the server write.
           bill.payments = merged;
           bill.paidAmount = totalPaid;
           bill.status = nextStatus;
@@ -439,20 +365,13 @@ export default function Dashboard({ onNew, onEdit, onPrint, onDuplicate, onConve
           reconcileWrites.push(saveBill(bill, { overwrite: true }).catch(() => null));
         }
         if (reconcileWrites.length) await Promise.allSettled(reconcileWrites);
-      } catch { /* non-fatal — worst case, user still sees orphaned state */ }
+      } catch { /* non-fatal */ }
       if (reconciled > 0) {
         toast(`Reconciled ${reconciled} orphaned payment${reconciled === 1 ? '' : 's'} against ${reconciled === 1 ? 'its' : 'their'} invoice${reconciled === 1 ? '' : 's'}`, 'success', 6000);
       }
 
-      // Auto-detect overdue: if due date passed and not paid, mark as overdue.
-      // Previously this did sequential `await saveBill(bill)` inside a for-loop,
-      // which (a) made N round-trips serialised and (b) silently stopped on the
-      // first failure. Now we collect dirty bills and save them concurrently via
-      // allSettled so one slow save can't block the rest.
       const dirty = data.filter(bill => {
         const dueDate = bill.data?.details?.dueDate;
-        // Only sales can be overdue: a quotation, proforma, challan or credit
-        // note is not money the client owes.
         return dueDate && dueDate < today && bill.status !== 'paid' && bill.status !== 'overdue' && bill.status !== 'cancelled'
           && SALES_INVOICE_TYPES.includes(bill.invoiceType || 'tax-invoice');
       });
@@ -461,7 +380,6 @@ export default function Dashboard({ onNew, onEdit, onPrint, onDuplicate, onConve
         await Promise.allSettled(updates);
       }
 
-      // Headline totals are derived from the business-filtered list (`stats`).
       setBills(data);
     } catch {
       toast('Failed to load invoices', 'error');
@@ -471,19 +389,83 @@ export default function Dashboard({ onNew, onEdit, onPrint, onDuplicate, onConve
   useEffect(() => {
     loadBills();
     getProfile().then(p => setProfileState(p)).catch(() => {});
-    getAllClients().then(c => setClients(c)).catch(() => {});
-    // Pull the stock-alert config alongside products so the Dashboard's
-    // low-stock card honours the user's threshold + on/off preference.
     Promise.all([
+      getAllClients().catch(() => []),
+      getAllSuppliers().catch(() => []),
+      getAllLedgers().catch(() => []),
+      getAllPurchases().catch(() => []),
+      getAllExpenses().catch(() => []),
+      getAllReceipts().catch(() => []),
+      getAllCashEntries().catch(() => []),
+      getAllVouchers().catch(() => []),
       getAllProducts().catch(() => []),
       getStockAlertSettings().catch(() => ({ enabled: true, threshold: 5 })),
-    ]).then(([prods, cfg]) => {
-      setProductCount(prods.length);
+    ]).then(([cli, sup, led, pur, exp, rcp, cash, vch, prods, cfg]) => {
+      setClients(cli);
+      const { stockProducts } = quarantineNonStockProducts(prods, { ledgers: led, clients: cli, suppliers: sup });
+      setAccountingInputs({
+        ledgers: led,
+        suppliers: sup,
+        purchases: pur,
+        expenses: exp,
+        receipts: rcp,
+        cashEntries: cash,
+        vouchers: vch,
+        products: stockProducts,
+      });
+      setProductCount(stockProducts.length);
       if (cfg?.enabled === false) { setLowStockProducts([]); return; }
       const threshold = Number(cfg?.threshold ?? 5);
-      setLowStockProducts(findLowStock(prods, threshold)); // services and uncounted left out (#121)
+      setLowStockProducts(findLowStock(stockProducts, threshold));
     });
   }, []);
+
+  // Unified Double-Entry Book KPIs (Cash & Bank, Trade Receivables, Trade Payables, Net GST Position)
+  const unifiedBookKpis = useMemo(() => {
+    const book = buildDoubleEntryBook({
+      bills,
+      purchases: accountingInputs.purchases,
+      expenses: accountingInputs.expenses,
+      receipts: accountingInputs.receipts,
+      cashEntries: accountingInputs.cashEntries,
+      vouchers: accountingInputs.vouchers,
+      ledgers: accountingInputs.ledgers,
+      clients,
+      suppliers: accountingInputs.suppliers,
+      products: accountingInputs.products,
+    });
+    const cashAndBankAccounts = book.accounts.filter(
+      a => (a.group === 'Bank Accounts' || a.group === 'Cash-in-Hand') && (a.closingBalance > 0 || a.openingBalance > 0)
+    );
+    const cashBankSigned = cashAndBankAccounts.reduce((s, a) => s + a.signedClosing, 0);
+    const debtorsSigned = book.accounts
+      .filter(a => a.group === 'Sundry Debtors')
+      .reduce((s, a) => s + (a.signedClosing > 0 ? a.closingBalance : 0), 0);
+    const creditorsSigned = book.accounts
+      .filter(a => a.group === 'Sundry Creditors')
+      .reduce((s, a) => s + (a.signedClosing < 0 ? a.closingBalance : 0), 0);
+
+    const taxAccounts = book.accounts.filter(a => a.group === 'Duties & Taxes');
+    let outputGst = 0;
+    let inputItc = 0;
+    for (const t of taxAccounts) {
+      if (t.signedClosing < 0) outputGst += t.closingBalance;
+      else if (t.signedClosing > 0) inputItc += t.closingBalance;
+    }
+    const netGstSigned = outputGst - inputItc; // >0 means Cr (Payable), <0 means Dr (ITC Credit)
+
+    return {
+      cashBankTotal: Math.abs(cashBankSigned),
+      cashBankSign: cashBankSigned >= 0 ? 'Dr' : 'Cr',
+      cashAndBankAccounts: cashAndBankAccounts.slice(0, 3),
+      receivablesTotal: debtorsSigned,
+      payablesTotal: creditorsSigned,
+      outputGst,
+      inputItc,
+      netGstAmount: Math.abs(netGstSigned),
+      netGstSign: netGstSigned >= 0 ? 'Cr' : 'Dr',
+    };
+  }, [bills, clients, accountingInputs]);
 
   useEffect(() => {
     let result = bills;
@@ -1547,6 +1529,130 @@ export default function Dashboard({ onNew, onEdit, onPrint, onDuplicate, onConve
         </div>
       )}
 
+      {/* Unified Double-Entry & ERP Executive KPI Strip (Bound to General & Party Ledgers + Vouchers) */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))',
+          gap: '10px',
+          marginBottom: '12px',
+        }}
+      >
+        {/* 1. Cash & Bank Balances */}
+        <div
+          onClick={() => onOpenAccounting && onOpenAccounting('ledgers')}
+          style={{
+            background: '#FFFFFF',
+            border: '1px solid #E2E8F0',
+            borderTop: '3px solid #1D4ED8',
+            borderRadius: '6px',
+            padding: '10px 12px',
+            cursor: onOpenAccounting ? 'pointer' : 'default',
+          }}
+          title="Aggregated from Cash-in-Hand and Bank Account Ledgers (Click to open Ledgers & BRS)"
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+            <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: '#475569' }}>
+              Cash &amp; Bank Balances
+            </span>
+            <span className={unifiedBookKpis.cashBankSign === 'Dr' ? 'dr-badge' : 'cr-badge'}>
+              {unifiedBookKpis.cashBankSign}
+            </span>
+          </div>
+          <div className="num-mono" style={{ fontSize: '18px', fontWeight: 800, color: '#0F172A' }}>
+            ₹{formatIndianNumber(unifiedBookKpis.cashBankTotal)}
+          </div>
+          <div style={{ fontSize: '10.5px', color: '#64748B', marginTop: '4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {unifiedBookKpis.cashAndBankAccounts.length > 0
+              ? unifiedBookKpis.cashAndBankAccounts.map(a => `${a.name}: ₹${formatIndianNumber(a.closingBalance)}`).join(' · ')
+              : 'Cash-in-Hand & Bank A/cs'}
+          </div>
+        </div>
+
+        {/* 2. Trade Receivables (Sundry Debtors) */}
+        <div
+          onClick={() => onOpenAccounting && onOpenAccounting('ledgers')}
+          style={{
+            background: '#FFFFFF',
+            border: '1px solid #E2E8F0',
+            borderTop: '3px solid #2563EB',
+            borderRadius: '6px',
+            padding: '10px 12px',
+            cursor: onOpenAccounting ? 'pointer' : 'default',
+          }}
+          title="Aggregated from Sundry Debtors Party Ledgers & Sales Invoices"
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+            <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: '#475569' }}>
+              Trade Receivables
+            </span>
+            <span className="dr-badge">Dr</span>
+          </div>
+          <div className="num-mono" style={{ fontSize: '18px', fontWeight: 800, color: '#0F172A' }}>
+            ₹{formatIndianNumber(unifiedBookKpis.receivablesTotal)}
+          </div>
+          <div style={{ fontSize: '10.5px', color: '#64748B', marginTop: '4px' }}>
+            Sundry Debtors ({clients.length} Party Masters)
+          </div>
+        </div>
+
+        {/* 3. Trade Payables (Sundry Creditors) */}
+        <div
+          onClick={() => onOpenAccounting && onOpenAccounting('ledgers')}
+          style={{
+            background: '#FFFFFF',
+            border: '1px solid #E2E8F0',
+            borderTop: '3px solid #15803D',
+            borderRadius: '6px',
+            padding: '10px 12px',
+            cursor: onOpenAccounting ? 'pointer' : 'default',
+          }}
+          title="Aggregated from Sundry Creditors Supplier Ledgers & Purchase Bills"
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+            <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: '#475569' }}>
+              Trade Payables
+            </span>
+            <span className="cr-badge">Cr</span>
+          </div>
+          <div className="num-mono" style={{ fontSize: '18px', fontWeight: 800, color: '#0F172A' }}>
+            ₹{formatIndianNumber(unifiedBookKpis.payablesTotal)}
+          </div>
+          <div style={{ fontSize: '10.5px', color: '#64748B', marginTop: '4px' }}>
+            Sundry Creditors ({accountingInputs.suppliers.length} Suppliers)
+          </div>
+        </div>
+
+        {/* 4. Net GST Position (Output vs Input ITC) */}
+        <div
+          onClick={() => onOpenAccounting && onOpenAccounting('trial-balance')}
+          style={{
+            background: '#FFFFFF',
+            border: '1px solid #E2E8F0',
+            borderTop: '3px solid #0F172A',
+            borderRadius: '6px',
+            padding: '10px 12px',
+            cursor: onOpenAccounting ? 'pointer' : 'default',
+          }}
+          title="Net GST Position across Output CGST/SGST/IGST and Input ITC Ledgers"
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+            <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: '#475569' }}>
+              Net GST Position
+            </span>
+            <span className={unifiedBookKpis.netGstSign === 'Dr' ? 'dr-badge' : 'cr-badge'}>
+              {unifiedBookKpis.netGstSign === 'Dr' ? 'Dr (ITC Credit)' : 'Cr (Payable)'}
+            </span>
+          </div>
+          <div className="num-mono" style={{ fontSize: '18px', fontWeight: 800, color: '#0F172A' }}>
+            ₹{formatIndianNumber(unifiedBookKpis.netGstAmount)}
+          </div>
+          <div style={{ fontSize: '10.5px', color: '#64748B', marginTop: '4px', fontFamily: 'var(--erp-font-mono)' }}>
+            Out: ₹{formatIndianNumber(unifiedBookKpis.outputGst)} · ITC: ₹{formatIndianNumber(unifiedBookKpis.inputItc)}
+          </div>
+        </div>
+      </div>
+
       <div className="stats-grid stats-grid-4">
         <div className="stat-card">
           <div className="stat-icon stat-icon-blue"><IndianRupee size={22} /></div>
@@ -1557,7 +1663,7 @@ export default function Dashboard({ onNew, onEdit, onPrint, onDuplicate, onConve
                 {formatCurrency(v.total, cur)}
               </div>
             ))}
-            {Object.keys(stats.byCurrency).length === 0 && <h2 className="stat-value">—</h2>}
+            {Object.keys(stats.byCurrency).length === 0 && <h2 className="stat-value">₹0.00</h2>}
             {Object.keys(stats.byCurrency).length > 1 && (
               <div className="text-muted" style={{ fontSize: '0.72rem', marginTop: 2 }} title="Each invoice at the exchange rate saved on it">
                 ≈ {formatCurrency(stats.inBase, baseCur)} in all{stats.noRate ? ` (${stats.noRate} without a rate left out)` : ''}
@@ -1574,7 +1680,7 @@ export default function Dashboard({ onNew, onEdit, onPrint, onDuplicate, onConve
                 {formatCurrency(v.tax, cur)}
               </div>
             ))}
-            {Object.keys(stats.byCurrency).length === 0 && <h2 className="stat-value stat-value-green">—</h2>}
+            {Object.keys(stats.byCurrency).length === 0 && <h2 className="stat-value stat-value-green">₹0.00</h2>}
           </div>
         </div>
         <div className="stat-card">
@@ -1586,7 +1692,7 @@ export default function Dashboard({ onNew, onEdit, onPrint, onDuplicate, onConve
                 {formatCurrency(v.unpaid, cur)}
               </div>
             ))}
-            {Object.keys(stats.byCurrency).length === 0 && <h2 className="stat-value stat-value-amber">—</h2>}
+            {Object.keys(stats.byCurrency).length === 0 && <h2 className="stat-value stat-value-amber">₹0.00</h2>}
           </div>
         </div>
         <div className="stat-card">

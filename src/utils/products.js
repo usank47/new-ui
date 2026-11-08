@@ -45,14 +45,55 @@ export const FUEL_TYPES = ['Petrol', 'Diesel', 'CNG', 'Electric / EV', 'Hybrid',
 const cleanToken = (s) => String(s || '').trim().toUpperCase().replace(/[\s\-_/\\.]+/g, '');
 const cleanText = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 
+// Multi-pass HTML/XML entity decoder: converts &amp;amp; -> &amp; -> &
+export const decodeHtmlEntities = (str = '') => {
+  if (str === null || str === undefined) return '';
+  let out = String(str);
+  for (let i = 0; i < 4; i++) {
+    if (!out.includes('&')) break;
+    const next = out
+      .replace(/&amp;/gi, '&')
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;|&apos;/gi, "'");
+    if (next === out) break;
+    out = next;
+  }
+  return out.trim();
+};
+
 export const KNOWN_ACCOUNT_GROUPS_RE = /\b(sundry\s*debtors?|sundry\s*creditors?|duties\s*(?:&|and)\s*taxes|current\s*assets?|current\s*liabilities|bank\s*accounts?|bank\s*o\/d|bank\s*od|cash[\s-]*in[\s-]*hand|expenses?\s*\(indirect|expenses?\s*\(direct|indirect\s*expenses?|direct\s*expenses?|income\s*\(indirect|income\s*\(direct|indirect\s*income|direct\s*income|revenue\s*accounts?|sales\s*accounts?|purchase\s*accounts?|fixed\s*assets?|capital\s*accounts?|loans?\s*\(liability\)|loans?\s*(?:&|and)\s*advances?|secured\s*loans?|unsecured\s*loans?|securities\s*(?:&|and)\s*deposits?|provisions?|reserves?\s*(?:&|and)\s*surplus|branch\s*\/?\s*divisions?|suspense\s*a\/c|suspense\s*account|stock[\s-]*in[\s-]*hand|investments?|misc\.?\s*expenses?|primary\s*group)\b/i;
 
 export const KNOWN_ACCOUNT_NAMES_RE = /^(add\.?\s*cess|cess\s+on\s+gst|cgst\s*(input|output|payable|receivable|on\s+|adjustable|a\/c|%|$)|sgst\s*(input|output|payable|receivable|on\s+|adjustable|a\/c|%|$)|igst\s*(input|output|payable|receivable|on\s+|adjustable|a\/c|%|$)|utgst|gst\s+(input|output|payable|receivable| adjustable)|central\s+sales\s+tax|vat\s+(input|output|payable)|service\s+tax|tds\s+(payable|receivable|on\s+|by\s+)|tcs\s+(payable|receivable|on\s+|by\s+)|busy\s+infotech|advertisement\s*(?:&|and)\s*publicity|audit\s+fees?|bad\s+debts?\s*(written\s+off)?|bank\s+charges?|bank\s+interest|books\s*(?:&|and)\s*periodicals|cash$|cash\s+in\s+hand|cash\s+a\/c|charity\s*(?:&|and)\s*donations?|commission\s+on\s+(sales|purchases)|computers?$|conveyance\s+expenses?|customer\s+entertainment\s+expenses?|depreciation\s*a\/c|depreciation\s+account|discount\s+(allowed|received|a\/c)|donations?$|earnest\s+money|electricity\s+(charges?|expenses?)|entertainment\s+expenses?|festival\s+celebration\s+expenses?|freight\s*(?:&|and)\s*(cartage|forwarding|inward|outward)|furniture\s*(?:&|and)\s*fixtures?|general\s+expenses?|godown\s+rent|interest\s+on\s+(loan|od|capital|late\s+payment)|interest\s+(paid|received|a\/c)|job\s+work\s+charges?|labour\s+charges?|legal\s+expenses?|machinery\s*(?:&|and)\s*equipments?|medical\s+expenses?|membership\s*(?:&|and)\s*subscriptions?|misc\.?\s+expenses?|miscellaneous\s+expenses?|newspaper\s*(?:&|and)\s*periodicals|office\s+equipments?|office\s+expenses?|office\s+maint(ainance|enance)|packing\s+(charges?|expenses?)|penalty\s*(?:&|and)\s*fines?|petrol\s*(?:&|and)\s*diesel\s+expenses?|postage\s*(?:&|and)\s*(telegram|courier)|power\s*(?:&|and)\s*fuel|preliminary\s+expenses?|printing\s*(?:&|and)\s*station(ery|ary)|professional\s+(charges?|fees?)|profit\s*(?:&|and)\s*loss|provident\s+fund|purchase\s+account|rebate\s*(?:&|and)\s*discount|refreshment\s+expenses?|rent\s+(paid|received|a\/c|expenses?)|repair\s*(?:&|and)\s*maint|round(ing)?\s+off|salary\s*(?:&|and)\s*(bonus|wages)|sales\s+account|sales\s+promotion\s+expenses?|security\s+deposit|service\s+charges?|software\s+expenses?|staff\s+welfare\s+expenses?|station(ery|ary)\s+expenses?|sundry\s+(debtors?|creditors?)|suspense\s*(account|a\/c)?$|tea\s*(?:&|and)\s*coffee\s+expenses?|telephone\s+expenses?|tour\s*(?:&|and)\s*travelling|transport(ation)?\s+charges?|travelling\s*(?:&|and)?\s*(conveyance\s+)?expenses?|uniform\s+expenses?|vehicle\s+running\s*(?:&|and)?\s*maint|wages\s*(a\/c|expenses?)?$|water\s*(?:&|and)\s*electricity)/i;
 
+export const inferAccountGroupForMisclassifiedProduct = (p = {}) => {
+  const name = decodeHtmlEntities(p.name || '');
+  const groupFields = [p.accountGroup, p.parentGroup, p.category, p.productGroup, p.brand, p.manufacturer]
+    .map(v => decodeHtmlEntities(v || ''))
+    .filter(Boolean);
+  const explicitGroup = groupFields.find(g => KNOWN_ACCOUNT_GROUPS_RE.test(g));
+  if (explicitGroup) {
+    if (/duties|tax/i.test(explicitGroup)) return 'Duties & Taxes';
+    if (/direct\s*exp/i.test(explicitGroup)) return 'Direct Expenses';
+    if (/indirect\s*exp/i.test(explicitGroup)) return 'Indirect Expenses';
+    if (/bank/i.test(explicitGroup)) return 'Bank Accounts';
+    if (/cash/i.test(explicitGroup)) return 'Cash-in-Hand';
+    if (/debtor/i.test(explicitGroup)) return 'Sundry Debtors';
+    if (/creditor/i.test(explicitGroup)) return 'Sundry Creditors';
+    return explicitGroup;
+  }
+  if (/cess|cgst|sgst|igst|utgst|gst|tax|tds|tcs|vat/i.test(name)) return 'Duties & Taxes';
+  if (/freight|cartage|forwarding|labour|wages|power\s*(?:&|and)\s*fuel/i.test(name)) return 'Direct Expenses';
+  if (/cash/i.test(name)) return 'Cash-in-Hand';
+  if (/bank\s+a\/c|saving\s+account|indusind|axis\s+bank|hdfc|icici|sbi/i.test(name)) return 'Bank Accounts';
+  return 'Indirect Expenses';
+};
+
 // Returns true if a record sitting in products is actually a BUSY Accounting ledger / party master
 export const isMisclassifiedAccountProduct = (p = {}, { clients = [], suppliers = [], ledgers = [] } = {}) => {
   if (!p || typeof p !== 'object') return false;
-  const name = String(p.name || '').trim();
+  const name = decodeHtmlEntities(p.name || '');
   if (!name) return false;
 
   // Explicit domain/subType marker if present
@@ -61,12 +102,12 @@ export const isMisclassifiedAccountProduct = (p = {}, { clients = [], suppliers 
     return true;
   }
 
-  // Known standard BUSY account names (e.g. Add. Cess on GST Input, CGST Output, Cash, Busy Infotech, etc.)
+  // Known standard BUSY account names (e.g. Add. Cess on GST Input, CGST Output, Advertisement & Publicity, etc.)
   if (KNOWN_ACCOUNT_NAMES_RE.test(name)) return true;
 
   // Known accounting group stored in accountGroup, parentGroup, category, productGroup, or brand
   const groupFields = [p.accountGroup, p.parentGroup, p.category, p.productGroup, p.brand, p.manufacturer]
-    .map(v => String(v || '').trim())
+    .map(v => decodeHtmlEntities(v || ''))
     .filter(Boolean);
   if (groupFields.some(g => KNOWN_ACCOUNT_GROUPS_RE.test(g))) return true;
 
@@ -84,26 +125,54 @@ export const isMisclassifiedAccountProduct = (p = {}, { clients = [], suppliers 
   if (hasNoProductPricing && num(p.stock) === 0) {
     const lowerName = name.toLowerCase();
     const inPartiesOrLedgers =
-      clients.some(c => String(c?.name || '').trim().toLowerCase() === lowerName) ||
-      suppliers.some(s => String(s?.name || '').trim().toLowerCase() === lowerName) ||
-      ledgers.some(l => String(l?.name || '').trim().toLowerCase() === lowerName);
+      clients.some(c => decodeHtmlEntities(c?.name || '').toLowerCase() === lowerName) ||
+      suppliers.some(s => decodeHtmlEntities(s?.name || '').toLowerCase() === lowerName) ||
+      ledgers.some(l => decodeHtmlEntities(l?.name || '').toLowerCase() === lowerName);
     if (inPartiesOrLedgers) return true;
   }
 
   return false;
 };
 
+// Partition a raw products array into clean stock products vs quarantined non-stock accounting ledgers
+export const quarantineNonStockProducts = (products = [], context = {}) => {
+  const cleanProducts = [];
+  const quarantinedLedgers = [];
+  for (const p of products || []) {
+    if (!p || typeof p !== 'object') continue;
+    const decoded = {
+      ...p,
+      name: decodeHtmlEntities(p.name || ''),
+    };
+    if (isMisclassifiedAccountProduct(decoded, context)) {
+      const targetGroup = inferAccountGroupForMisclassifiedProduct(decoded);
+      quarantinedLedgers.push({
+        ...decoded,
+        targetGroup,
+        suggestedGroup: targetGroup,
+        normalSide: targetGroup === 'Duties & Taxes' && /output|payable/i.test(decoded.name) ? 'Cr' : 'Dr',
+        reason: /cess|gst|tax/i.test(decoded.name)
+          ? 'Statutory GST / Cess Ledger misclassified as Stock Item'
+          : 'Accounting / Indirect Expense Ledger misclassified as Stock Item',
+      });
+    } else {
+      cleanProducts.push(normalizeAutomotiveProduct(decoded));
+    }
+  }
+  return { cleanProducts, stockProducts: cleanProducts, quarantinedLedgers };
+};
+
 // Normalize an automotive product record so UI and accounting always have consistent fields.
 // In BUSY Accounting, the Alias field holds the Spare Part Number and maps to oemPartNo.
 export const normalizeAutomotiveProduct = (p = {}) => {
-  const name = String(p.name || '').trim();
-  const rawAlias = String(p.alias || p.itemAlias || p.aliasName || p.masterAlias || '').trim();
-  const rawCode = String(p.itemCode || p.sku || p.code || '').trim();
+  const name = decodeHtmlEntities(p.name || '');
+  const rawAlias = decodeHtmlEntities(p.alias || p.itemAlias || p.aliasName || p.masterAlias || '');
+  const rawCode = decodeHtmlEntities(p.itemCode || p.sku || p.code || '');
   // Avoid using internal printName/name as part code
   const validCode = rawCode && rawCode.toLowerCase() !== name.toLowerCase() ? rawCode : '';
-  const oemPartNo = String(p.oemPartNo || rawAlias || p.partNo || p.partNumber || validCode || '').trim();
-  const alias = String(rawAlias || oemPartNo || validCode || '').trim();
-  const itemCode = String(validCode || rawAlias || oemPartNo || '').trim();
+  const oemPartNo = decodeHtmlEntities(p.oemPartNo || rawAlias || p.partNo || p.partNumber || validCode || '');
+  const alias = decodeHtmlEntities(rawAlias || oemPartNo || validCode || '');
+  const itemCode = decodeHtmlEntities(validCode || rawAlias || oemPartNo || '');
 
   const sellingPrice = num(p.sellingPrice ?? p.rate);
   const purchasePrice = num(p.purchasePrice);
@@ -120,18 +189,18 @@ export const normalizeAutomotiveProduct = (p = {}) => {
     itemCode,
     oemPartNo,
     partNo: oemPartNo,
-    mfgPartNo: String(p.mfgPartNo || '').trim(),
-    altPartNo: String(p.altPartNo || '').trim(),
-    sku: String(p.sku || itemCode || '').trim(),
+    mfgPartNo: decodeHtmlEntities(p.mfgPartNo || ''),
+    altPartNo: decodeHtmlEntities(p.altPartNo || ''),
+    sku: decodeHtmlEntities(p.sku || itemCode || ''),
     barcode: String(p.barcode || '').trim(),
     hsn: String(p.hsn || '').trim(),
-    description: String(p.description || '').trim(),
-    brand: String(p.brand || '').trim(),
-    manufacturer: String(p.manufacturer || p.brand || '').trim(),
+    description: decodeHtmlEntities(p.description || ''),
+    brand: decodeHtmlEntities(p.brand || ''),
+    manufacturer: decodeHtmlEntities(p.manufacturer || p.brand || ''),
     partType: p.partType || 'Aftermarket Standard',
-    category: p.category || '',
-    productGroup: p.productGroup || p.category || '',
-    subcategory: p.subcategory || '',
+    category: decodeHtmlEntities(p.category || ''),
+    productGroup: decodeHtmlEntities(p.productGroup || p.category || ''),
+    subcategory: decodeHtmlEntities(p.subcategory || ''),
     taxPercent: num(p.taxPercent ?? 18),
     unit: p.unit || 'Nos',
     purchaseUnit: p.purchaseUnit || p.unit || 'Nos',

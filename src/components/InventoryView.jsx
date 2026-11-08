@@ -11,6 +11,8 @@ import {
   saveVoucher,
   getAllWarehouses,
   saveWarehouse,
+  getAllLedgers,
+  saveLedger,
 } from '../store';
 import { formatCurrency, isServiceProduct } from '../utils';
 import {
@@ -19,7 +21,9 @@ import {
   PART_TYPES,
   FUEL_TYPES,
   normalizeAutomotiveProduct,
-  isMisclassifiedAccountProduct,
+  quarantineNonStockProducts,
+  inferAccountGroupForMisclassifiedProduct,
+  decodeHtmlEntities,
   computeProductMargins,
   findDuplicateProducts,
   productMatchesSearch,
@@ -84,6 +88,8 @@ const emptyProductForm = () => ({
 
 export default function InventoryView({ showToast = toast, initialAction, clearInitialAction, onOpenBusyImport }) {
   const [products, setProducts] = useState([]);
+  const [quarantinedItems, setQuarantinedItems] = useState([]);
+  const [reclassifying, setReclassifying] = useState(false);
   const [bills, setBills] = useState([]);
   const [purchases, setPurchases] = useState([]);
   const [vouchers, setVouchers] = useState([]);
@@ -92,7 +98,7 @@ export default function InventoryView({ showToast = toast, initialAction, clearI
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [brandFilter, setBrandFilter] = useState('All');
   const [stockFilter, setStockFilter] = useState('all'); // 'all' | 'low' | 'negative' | 'dead' | 'fast'
-  const [activeSubTab, setActiveSubTab] = useState('catalog'); // 'catalog' | 'adjustments' | 'reconcile' | 'production'
+  const [activeSubTab, setActiveSubTab] = useState('catalog'); // 'catalog' | 'quarantine' | 'adjustments' | 'reconcile' | 'production'
   const [expandedProductId, setExpandedProductId] = useState(null);
 
   // Modal state
@@ -138,24 +144,63 @@ export default function InventoryView({ showToast = toast, initialAction, clearI
   const [newWarehouseName, setNewWarehouseName] = useState('');
 
   const loadAll = async () => {
-    const [prods, bls, purs, vchs, whs, invCfg] = await Promise.all([
+    const [prods, bls, purs, vchs, whs, invCfg, ldgs] = await Promise.all([
       getAllProducts(),
       getAllBills(),
       getAllPurchases(),
       getAllVouchers(),
       getAllWarehouses(),
       getInventorySettings(),
+      getAllLedgers(),
     ]);
-    setProducts(
-      (prods || [])
-        .filter(p => !isMisclassifiedAccountProduct(p))
-        .map(normalizeAutomotiveProduct)
-    );
+    const { stockProducts, quarantinedLedgers } = quarantineNonStockProducts(prods || [], { ledgers: ldgs || [] });
+    setProducts(stockProducts.map(normalizeAutomotiveProduct));
+    setQuarantinedItems(quarantinedLedgers);
     setBills(bls || []);
     setPurchases(purs || []);
     setVouchers(vchs || []);
     setWarehouses(whs?.length ? whs : [{ id: 'wh_main', name: 'Main Store', code: 'MAIN' }, { id: 'wh_branch', name: 'Workshop Bay Store', code: 'BAY-1' }]);
     setInvSettings(invCfg);
+  };
+
+  const handleReclassifyQuarantine = async () => {
+    if (!quarantinedItems.length) {
+      showToast('Zero non-stock ledgers remain in the spare-parts catalog.', 'info');
+      return;
+    }
+    setReclassifying(true);
+    try {
+      const resp = await fetch('/api/products/reclassify-quarantine', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        await loadAll();
+        showToast(`Reclassified ${data.reclassifiedCount ?? quarantinedItems.length} non-stock ledger(s) to General Ledgers (Duties & Taxes / Indirect Expenses)`, 'success');
+        if (activeSubTab === 'quarantine') setActiveSubTab('catalog');
+        return;
+      }
+    } catch {
+      // Fallback to client-side store reclassification
+    } finally {
+      setReclassifying(false);
+    }
+
+    // Client-side fallback if API call didn't run
+    for (const item of quarantinedItems) {
+      await saveLedger({
+        name: decodeHtmlEntities(item.name || ''),
+        code: item.oemPartNo || item.itemCode || '',
+        group: item.suggestedGroup || inferAccountGroupForMisclassifiedProduct(item),
+        openingBalance: 0,
+        openingType: (item.suggestedGroup || '').includes('Duties') ? 'Cr' : 'Dr',
+      });
+      await deleteProduct(item.id);
+    }
+    await loadAll();
+    showToast(`Reclassified ${quarantinedItems.length} non-stock ledger(s) to General Ledgers`, 'success');
+    if (activeSubTab === 'quarantine') setActiveSubTab('catalog');
   };
 
   useEffect(() => {
@@ -665,6 +710,13 @@ export default function InventoryView({ showToast = toast, initialAction, clearI
             Parts Catalog ({stats.totalItems})
           </button>
           <button
+            className={`btn btn-sm ${activeSubTab === 'quarantine' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setActiveSubTab('quarantine')}
+            style={quarantinedItems.length > 0 ? { borderColor: '#F59E0B', color: activeSubTab === 'quarantine' ? '#fff' : '#B45309' } : undefined}
+          >
+            BUSY .DAT Quarantine ({quarantinedItems.length})
+          </button>
+          <button
             className={`btn btn-sm ${activeSubTab === 'adjustments' ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => setActiveSubTab('adjustments')}
           >
@@ -685,31 +737,150 @@ export default function InventoryView({ showToast = toast, initialAction, clearI
         </div>
       </div>
 
+      {/* BUSY .DAT Non-Stock Ledger Quarantine Alert Banner */}
+      {quarantinedItems.length > 0 && (
+        <div
+          className="glass-card"
+          style={{
+            padding: '12px 16px',
+            marginBottom: 16,
+            background: '#FFFBEB',
+            border: '1px solid #FDE68A',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: 12,
+          }}
+        >
+          <div>
+            <div style={{ fontWeight: 700, color: '#92400E', fontSize: '0.88rem' }}>
+              BUSY .DAT Sanitizer Quarantine: {quarantinedItems.length} Non-Stock Accounting Ledger(s) Detected
+            </div>
+            <div style={{ fontSize: '0.78rem', color: '#78350F', marginTop: 2 }}>
+              Items such as <strong>{quarantinedItems.slice(0, 4).map(q => decodeHtmlEntities(q.name)).join(', ')}</strong> have been excluded from the Spare-Parts Catalog, POS Counter, and Low-Stock Ticker.
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => setActiveSubTab('quarantine')}
+            >
+              Inspect Quarantine ({quarantinedItems.length})
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              disabled={reclassifying}
+              onClick={handleReclassifyQuarantine}
+            >
+              {reclassifying ? 'Reclassifying...' : 'Reclassify Non-Stock Ledgers to General Ledgers'}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* KPI Summary Strip */}
       <div className="dashboard-stats" style={{ marginBottom: 16 }}>
         <div className="stat-card" onClick={() => { setActiveSubTab('catalog'); setStockFilter('all'); }} style={{ cursor: 'pointer' }}>
           <div className="stat-label">Total Spare Parts</div>
-          <div className="stat-value">{stats.totalItems}</div>
+          <div className="stat-value num-mono">{stats.totalItems}</div>
           <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>Click row for pricing tiers & vehicle fitments</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Stock Value (At Cost)</div>
-          <div className="stat-value">{formatCurrency(stats.totalValuationCost)}</div>
-          <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>Retail Value: {formatCurrency(stats.totalValuationRetail)}</div>
+          <div className="stat-value num-mono">{formatCurrency(stats.totalValuationCost)}</div>
+          <div className="num-mono" style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>Retail Value: {formatCurrency(stats.totalValuationRetail)}</div>
         </div>
         <div className="stat-card" onClick={() => { setActiveSubTab('catalog'); setStockFilter('low'); }} style={{ cursor: 'pointer' }}>
           <div className="stat-label">Low / Reorder Stock</div>
-          <div className="stat-value" style={{ color: stats.lowCount > 0 ? 'var(--warning)' : 'inherit' }}>{stats.lowCount}</div>
+          <div className="stat-value num-mono" style={{ color: stats.lowCount > 0 ? 'var(--warning)' : 'inherit' }}>{stats.lowCount}</div>
           <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>At or below reorder level</div>
         </div>
         <div className="stat-card" onClick={() => { setActiveSubTab('catalog'); setStockFilter('negative'); }} style={{ cursor: 'pointer' }}>
           <div className="stat-label">Negative / Dead Stock</div>
-          <div className="stat-value" style={{ color: stats.negativeCount > 0 ? 'var(--danger)' : 'inherit' }}>
+          <div className="stat-value num-mono" style={{ color: stats.negativeCount > 0 ? 'var(--danger)' : 'inherit' }}>
             {stats.negativeCount} Neg / {stats.deadCount} Dead
           </div>
           <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>Click to filter negative balances</div>
         </div>
       </div>
+
+      {activeSubTab === 'quarantine' && (
+        <div className="glass-card" style={{ padding: 20, marginBottom: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+            <div>
+              <h3 style={{ margin: 0 }}>BUSY .DAT Non-Stock Accounting Ledger Quarantine</h3>
+              <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                Accounting heads imported from BUSY Master streams (such as GST Input/Output Cess and Indirect Expenses) are automatically quarantined here so they never pollute your Automotive Spare-Parts Catalog or POS Counter.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={reclassifying || quarantinedItems.length === 0}
+              onClick={handleReclassifyQuarantine}
+            >
+              {reclassifying ? 'Reclassifying...' : `Reclassify Non-Stock Ledgers to General Ledgers (${quarantinedItems.length})`}
+            </button>
+          </div>
+          <div className="table-scroll">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Misclassified Record Name (HTML Decoded)</th>
+                  <th>Source Code / Alias</th>
+                  <th>Current Store</th>
+                  <th>Target Accounting Group</th>
+                  <th style={{ textAlign: 'right' }}>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {quarantinedItems.map(q => (
+                  <tr key={q.id}>
+                    <td style={{ fontWeight: 600, color: '#0F172A' }}>{decodeHtmlEntities(q.name)}</td>
+                    <td><code className="num-mono">{q.oemPartNo || q.itemCode || '—'}</code></td>
+                    <td><span className="tag">Quarantined from Products</span></td>
+                    <td>
+                      <span className={(q.suggestedGroup || '').includes('Duties') ? 'cr-badge' : 'dr-badge'}>
+                        {q.suggestedGroup || inferAccountGroupForMisclassifiedProduct(q)}
+                      </span>
+                    </td>
+                    <td style={{ textAlign: 'right' }}>
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        onClick={async () => {
+                          await saveLedger({
+                            name: decodeHtmlEntities(q.name || ''),
+                            code: q.oemPartNo || q.itemCode || '',
+                            group: q.suggestedGroup || inferAccountGroupForMisclassifiedProduct(q),
+                            openingBalance: 0,
+                            openingType: (q.suggestedGroup || '').includes('Duties') ? 'Cr' : 'Dr',
+                          });
+                          await deleteProduct(q.id);
+                          await loadAll();
+                          showToast(`Moved "${decodeHtmlEntities(q.name)}" to General Ledgers`, 'success');
+                        }}
+                      >
+                        Move to General Ledgers
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {quarantinedItems.length === 0 && (
+                  <tr>
+                    <td colSpan={5} style={{ textAlign: 'center', padding: 28, color: '#15803D', fontWeight: 600 }}>
+                      ✓ Catalog Hygiene Verified — Zero non-stock accounting ledgers (such as Add. Cess or Advertisement & Publicity) exist in the Automotive Spare-Parts Catalog.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {activeSubTab === 'production' && (
         <ProductionList products={products} onChanged={loadAll} />
@@ -756,7 +927,7 @@ export default function InventoryView({ showToast = toast, initialAction, clearI
                 type="number"
                 step="any"
                 min="0.01"
-                className="form-input"
+                className="form-input num-mono"
                 value={adjForm.quantity}
                 onChange={e => setAdjForm({ ...adjForm, quantity: e.target.value })}
                 required
@@ -766,7 +937,7 @@ export default function InventoryView({ showToast = toast, initialAction, clearI
               <label className="form-label">Date</label>
               <input
                 type="date"
-                className="form-input"
+                className="form-input num-mono"
                 value={adjForm.date}
                 onChange={e => setAdjForm({ ...adjForm, date: e.target.value })}
               />
@@ -863,14 +1034,14 @@ export default function InventoryView({ showToast = toast, initialAction, clearI
                 <tbody>
                   {vouchers.filter(v => v.voucherType === 'Stock Journal').slice(0, 15).map(v => (
                     <tr key={v.id}>
-                      <td>{v.date}</td>
-                      <td style={{ fontWeight: 600 }}>{v.voucherNo}</td>
+                      <td className="num-mono">{v.date}</td>
+                      <td className="num-mono" style={{ fontWeight: 600 }}>{v.voucherNo}</td>
                       <td>{v.productName} {v.oemPartNo ? `(${v.oemPartNo})` : ''}</td>
                       <td style={{ textTransform: 'capitalize' }}>{v.adjustmentMode}</td>
-                      <td style={{ color: v.delta >= 0 ? 'var(--success)' : 'var(--danger)', fontWeight: 600 }}>
+                      <td className="num-mono" style={{ color: v.delta >= 0 ? 'var(--success)' : 'var(--danger)', fontWeight: 600 }}>
                         {v.delta >= 0 ? `+${v.quantity}` : `-${v.quantity}`}
                       </td>
-                      <td>{v.previousStock} → <strong>{v.newStock}</strong></td>
+                      <td className="num-mono">{v.previousStock} → <strong>{v.newStock}</strong></td>
                       <td>{v.narration}</td>
                     </tr>
                   ))}
@@ -923,21 +1094,21 @@ export default function InventoryView({ showToast = toast, initialAction, clearI
                   return (
                     <tr key={p.id}>
                       <td style={{ fontWeight: 600 }}>{p.name}</td>
-                      <td><code>{p.oemPartNo || '—'}</code></td>
+                      <td><code className="num-mono">{p.oemPartNo || '—'}</code></td>
                       <td>{p.brand || '—'}</td>
                       <td>{[p.rack, p.binLocation].filter(Boolean).join(' / ') || '—'}</td>
-                      <td><strong>{sys}</strong> {p.unit || 'Nos'}</td>
+                      <td className="num-mono"><strong>{sys}</strong> {p.unit || 'Nos'}</td>
                       <td style={{ width: 140 }}>
                         <input
                           type="number"
                           step="any"
-                          className="form-input"
+                          className="form-input num-mono"
                           placeholder={String(sys)}
                           value={physRaw ?? ''}
                           onChange={e => setPhysicalCounts({ ...physicalCounts, [p.id]: e.target.value })}
                         />
                       </td>
-                      <td style={{ fontWeight: 700, color: !hasPhys || variance === 0 ? 'var(--text-muted)' : variance > 0 ? 'var(--success)' : 'var(--danger)' }}>
+                      <td className="num-mono" style={{ fontWeight: 700, color: !hasPhys || variance === 0 ? 'var(--text-muted)' : variance > 0 ? 'var(--success)' : 'var(--danger)' }}>
                         {hasPhys ? (variance > 0 ? `+${variance}` : variance) : '—'}
                       </td>
                     </tr>
@@ -989,21 +1160,21 @@ export default function InventoryView({ showToast = toast, initialAction, clearI
             </div>
           )}
 
-          {/* Main Products Listing Table — Sale Price (Rate) & Vehicle Fitment removed from main columns and moved to Expandable Detail View */}
+          {/* Main Products Listing Table with Sticky Left & Right Columns */}
           <div className="glass-card" style={{ padding: 0, overflow: 'hidden' }}>
             <div className="table-scroll">
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th style={{ width: 38 }}></th>
-                    <th>Part Name & Identification</th>
+                    <th style={{ width: 34 }}></th>
+                    <th className="sticky-col-left">Part Name & Identification</th>
                     <th>OEM / Mfg Part No</th>
                     <th>Brand / Make</th>
                     <th>Category</th>
                     <th>HSN</th>
-                    <th>GST %</th>
-                    <th>Stock & Bin</th>
-                    <th style={{ textAlign: 'right' }}>Actions</th>
+                    <th style={{ textAlign: 'right' }}>GST %</th>
+                    <th style={{ textAlign: 'right' }}>Stock & Bin</th>
+                    <th className="sticky-col-right" style={{ textAlign: 'right' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1024,7 +1195,7 @@ export default function InventoryView({ showToast = toast, initialAction, clearI
                           <td style={{ textAlign: 'center', fontWeight: 700, color: 'var(--primary)' }}>
                             {isExpanded ? '▼' : '▶'}
                           </td>
-                          <td>
+                          <td className="sticky-col-left">
                             {bulkMode ? (
                               <input
                                 className="form-input"
@@ -1033,7 +1204,7 @@ export default function InventoryView({ showToast = toast, initialAction, clearI
                               />
                             ) : (
                               <div>
-                                <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{p.name}</div>
+                                <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{decodeHtmlEntities(p.name)}</div>
                                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                                   {p.itemCode && <span>Code: {p.itemCode}</span>}
                                   {p.partType && <span>• {p.partType}</span>}
@@ -1047,7 +1218,7 @@ export default function InventoryView({ showToast = toast, initialAction, clearI
                             )}
                           </td>
                           <td>
-                            <div style={{ fontFamily: 'monospace', fontWeight: 600 }}>
+                            <div className="num-mono" style={{ fontWeight: 600 }}>
                               {p.oemPartNo || p.alias || p.itemCode || p.sku || '—'}
                             </div>
                             {(p.mfgPartNo || p.altPartNo) && (
@@ -1069,20 +1240,20 @@ export default function InventoryView({ showToast = toast, initialAction, clearI
                           <td>
                             {bulkMode ? (
                               <input
-                                className="form-input"
+                                className="form-input num-mono"
                                 style={{ width: 90 }}
                                 value={rowEdits.hsn ?? p.hsn}
                                 onChange={e => setBulkEdits({ ...bulkEdits, [p.id]: { ...rowEdits, hsn: e.target.value } })}
                               />
                             ) : (
-                              <code>{p.hsn || '—'}</code>
+                              <code className="num-mono">{p.hsn || '—'}</code>
                             )}
                           </td>
-                          <td>
+                          <td className="num-mono" style={{ textAlign: 'right' }}>
                             {bulkMode ? (
                               <input
                                 type="number"
-                                className="form-input"
+                                className="form-input num-mono"
                                 style={{ width: 70 }}
                                 value={rowEdits.taxPercent ?? p.taxPercent}
                                 onChange={e => setBulkEdits({ ...bulkEdits, [p.id]: { ...rowEdits, taxPercent: e.target.value } })}
@@ -1091,11 +1262,11 @@ export default function InventoryView({ showToast = toast, initialAction, clearI
                               <span>{p.taxPercent ?? 18}%</span>
                             )}
                           </td>
-                          <td>
+                          <td className="num-mono" style={{ textAlign: 'right' }}>
                             {bulkMode ? (
                               <input
                                 type="number"
-                                className="form-input"
+                                className="form-input num-mono"
                                 style={{ width: 90 }}
                                 value={rowEdits.stock ?? (p.stock ?? '')}
                                 onChange={e => setBulkEdits({ ...bulkEdits, [p.id]: { ...rowEdits, stock: e.target.value } })}
@@ -1124,20 +1295,20 @@ export default function InventoryView({ showToast = toast, initialAction, clearI
                               </div>
                             )}
                           </td>
-                          <td style={{ textAlign: 'right' }} onClick={e => e.stopPropagation()}>
-                            <div style={{ display: 'inline-flex', gap: 6 }}>
+                          <td className="sticky-col-right" style={{ textAlign: 'right', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
+                            <div style={{ display: 'inline-flex', gap: 5, whiteSpace: 'nowrap' }}>
                               <button
                                 className="btn btn-secondary btn-sm"
                                 onClick={() => setExpandedProductId(isExpanded ? null : p.id)}
                                 title="View Pricing Tiers & Vehicle Fitments"
                               >
-                                {isExpanded ? 'Hide Details' : 'Details'}
+                                {isExpanded ? 'Hide' : 'Details'}
                               </button>
                               <button className="btn btn-secondary btn-sm" onClick={() => openEdit(p)}>
                                 Edit
                               </button>
                               <button className="btn btn-danger btn-sm" onClick={() => handleDelete(p)}>
-                                Del
+                                Delete
                               </button>
                             </div>
                           </td>

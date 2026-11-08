@@ -107,7 +107,7 @@ const purchaseTdsFields = (form, taxable) => {
   };
 };
 
-export default function PurchaseBills() {
+export default function PurchaseBills({ initialTab = 'bills' }) {
   const [purchases, setPurchases] = useState([]);
   // v1.10.65 (#58 item 3) — the business these records belong to.
   const [ownerProfile, setOwnerProfile] = useState(null);
@@ -122,7 +122,7 @@ export default function PurchaseBills() {
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState({ ...emptyForm, items: [{ ...emptyItem }] });
   // v1.10.22 — OCR modal state.
-  const [showOCR, setShowOCR] = useState(false);
+  const [showOCR, setShowOCR] = useState(initialTab === 'ocr');
   // v1.10.30 — reported: "add a view only option modal type so can user
   // check the price without downloading the file every time". Holds the
   // purchase being previewed; modal has a Download PDF button inside.
@@ -135,6 +135,12 @@ export default function PurchaseBills() {
   const [poEnabled] = useState(() => isModuleEnabled('purchaseOrders', getEnabledModules()));
   const [tab, setTab] = useState('bills');
   const [orders, setOrders] = useState([]);
+
+  useEffect(() => {
+    if (initialTab === 'ocr') {
+      setShowOCR(true);
+    }
+  }, [initialTab]);
   // The number shown on a new PO; only that one is swapped for a reserved
   // number on save, so a number the user typed is kept.
   const previewedPoRef = useRef('');
@@ -1089,8 +1095,10 @@ export default function PurchaseBills() {
       <div className="page-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <div>
-            <h1 className="page-title">{poEnabled ? 'Purchases' : 'Purchase Bills'} <HelpButton title="Purchase Bills — how to use" doc="purchases" size={16} /></h1>
-            <p className="page-subtitle">Track supplier invoices for ITC claims in GSTR-3B</p>
+            <h1 className="page-title">{poEnabled ? 'Purchases & Inward Inventory (F9)' : 'Purchase Bills & AI/OCR Inward (F9)'} <HelpButton title="Purchase Bills — how to use" doc="purchases" size={16} /></h1>
+            <p className="page-subtitle">
+              Supplier Purchase Vouchers, Split-Screen AI/OCR Bill Capture (Alt+U), Automatic Stock Inward & GSTR-2B / 3B Table 4(A) ITC Claim
+            </p>
           </div>
         </div>
         {tab === 'orders' ? (
@@ -1099,11 +1107,11 @@ export default function PurchaseBills() {
           </div>
         ) : (
         <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
-          <button className="btn btn-secondary" onClick={() => setShowOCR(true)} title="Extract fields from a bill photo/scan">
-            <Wand2 size={16} /> Import from image (OCR)
+          <button className="btn btn-secondary" onClick={() => setShowOCR(true)} title="Extract supplier GSTIN, invoice no, and spare-part lines from a bill photo/PDF (Alt+U)">
+            <Wand2 size={16} /> AI / OCR Bill Capture (Alt+U)
           </button>
           <BulkCsvImport kind="purchase" onDone={() => { loadPurchases(); loadProducts(); }} />
-          <button className="btn btn-primary" onClick={openAdd}><Plus size={18} /> Add Purchase</button>
+          <button className="btn btn-primary" onClick={openAdd}><Plus size={18} /> Add Purchase Bill (F9)</button>
         </div>
         )}
       </div>

@@ -459,27 +459,70 @@ const SERVER_KNOWN_ACCOUNT_GROUPS_RE = /\b(sundry\s*debtors?|sundry\s*creditors?
 
 const SERVER_KNOWN_ACCOUNT_NAMES_RE = /^(add\.?\s*cess|cess\s+on\s+gst|cgst\s*(input|output|payable|receivable|on\s+|adjustable|a\/c|%|$)|sgst\s*(input|output|payable|receivable|on\s+|adjustable|a\/c|%|$)|igst\s*(input|output|payable|receivable|on\s+|adjustable|a\/c|%|$)|utgst|gst\s+(input|output|payable|receivable|adjustable)|central\s+sales\s+tax|vat\s+(input|output|payable)|service\s+tax|tds\s+(payable|receivable|on\s+|by\s+)|tcs\s+(payable|receivable|on\s+|by\s+)|busy\s+infotech|advertisement\s*(?:&|and)\s*publicity|audit\s+fees?|bad\s+debts?\s*(written\s+off)?|bank\s+charges?|bank\s+interest|books\s*(?:&|and)\s*periodicals|cash$|cash\s+in\s+hand|cash\s+a\/c|charity\s*(?:&|and)\s*donations?|commission\s+on\s+(sales|purchases)|computers?$|conveyance\s+expenses?|customer\s+entertainment\s+expenses?|depreciation\s*a\/c|depreciation\s+account|discount\s+(allowed|received|a\/c)|donations?$|earnest\s+money|electricity\s+(charges?|expenses?)|entertainment\s+expenses?|festival\s+celebration\s+expenses?|freight\s*(?:&|and)\s*(cartage|forwarding|inward|outward)|furniture\s*(?:&|and)\s*fixtures?|general\s+expenses?|godown\s+rent|interest\s+on\s+(loan|od|capital|late\s+payment)|interest\s+(paid|received|a\/c)|job\s+work\s+charges?|labour\s+charges?|legal\s+expenses?|machinery\s*(?:&|and)\s*equipments?|medical\s+expenses?|membership\s*(?:&|and)\s*subscriptions?|misc\.?\s+expenses?|miscellaneous\s+expenses?|newspaper\s*(?:&|and)\s*periodicals|office\s+equipments?|office\s+expenses?|office\s+maint(ainance|enance)|packing\s+(charges?|expenses?)|penalty\s*(?:&|and)\s*fines?|petrol\s*(?:&|and)\s*diesel\s+expenses?|postage\s*(?:&|and)\s*(telegram|courier)|power\s*(?:&|and)\s*fuel|preliminary\s+expenses?|printing\s*(?:&|and)\s*station(ery|ary)|professional\s+(charges?|fees?)|profit\s*(?:&|and)\s*loss|provident\s+fund|purchase\s+account|rebate\s*(?:&|and)\s*discount|refreshment\s+expenses?|rent\s+(paid|received|a\/c|expenses?)|repair\s*(?:&|and)\s*maint|round(ing)?\s+off|salary\s*(?:&|and)\s*(bonus|wages)|sales\s+account|sales\s+promotion\s+expenses?|security\s+deposit|service\s+charges?|software\s+expenses?|staff\s+welfare\s+expenses?|station(ery|ary)\s+expenses?|sundry\s+(debtors?|creditors?)|suspense\s*(account|a\/c)?$|tea\s*(?:&|and)\s*coffee\s+expenses?|telephone\s+expenses?|tour\s*(?:&|and)\s*travelling|transport(ation)?\s+charges?|travelling\s*(?:&|and)?\s*(conveyance\s+)?expenses?|uniform\s+expenses?|vehicle\s+running\s*(?:&|and)?\s*maint|wages\s*(a\/c|expenses?)?$|water\s*(?:&|and)\s*electricity)/i;
 
+function serverDecodeHtmlEntities(str = '') {
+  if (str === null || str === undefined) return '';
+  let out = String(str);
+  for (let i = 0; i < 4; i++) {
+    if (!out.includes('&')) break;
+    const next = out
+      .replace(/&amp;/gi, '&')
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;|&apos;/gi, "'");
+    if (next === out) break;
+    out = next;
+  }
+  return out.trim();
+}
+
 function sanitizeAndNormalizeProductsOnDisk() {
   const rawProducts = readAllFromDir('products');
-  if (!rawProducts.length) return [];
-
   const clients = readAllFromDir('clients');
   const suppliers = readAllFromDir('suppliers');
   const ledgers = readAllFromDir('ledgers');
+
+  // Decode any double-escaped HTML entities in existing ledgers, clients, and suppliers on disk
+  for (const l of ledgers) {
+    const cleanName = serverDecodeHtmlEntities(l?.name || '');
+    const cleanGroup = serverDecodeHtmlEntities(l?.group || '');
+    if (l?.id && (cleanName !== l.name || cleanGroup !== l.group)) {
+      l.name = cleanName;
+      if (cleanGroup) l.group = cleanGroup;
+      writeJSON(path.join(DATA_DIR, 'ledgers', safeFileName(l.id) + '.json'), l);
+    }
+  }
+  for (const c of clients) {
+    const cleanName = serverDecodeHtmlEntities(c?.name || '');
+    if (c?.id && cleanName !== c.name) {
+      c.name = cleanName;
+      writeJSON(path.join(DATA_DIR, 'clients', safeFileName(c.id) + '.json'), c);
+    }
+  }
+  for (const s of suppliers) {
+    const cleanName = serverDecodeHtmlEntities(s?.name || '');
+    if (s?.id && cleanName !== s.name) {
+      s.name = cleanName;
+      writeJSON(path.join(DATA_DIR, 'suppliers', safeFileName(s.id) + '.json'), s);
+    }
+  }
+
+  if (!rawProducts.length) return [];
+
   const partyOrLedgerNames = new Set([
-    ...clients.map(c => String(c?.name || '').trim().toLowerCase()),
-    ...suppliers.map(s => String(s?.name || '').trim().toLowerCase()),
-    ...ledgers.map(l => String(l?.name || '').trim().toLowerCase()),
+    ...clients.map(c => serverDecodeHtmlEntities(c?.name || '').toLowerCase()),
+    ...suppliers.map(s => serverDecodeHtmlEntities(s?.name || '').toLowerCase()),
+    ...ledgers.map(l => serverDecodeHtmlEntities(l?.name || '').toLowerCase()),
   ].filter(Boolean));
-  const ledgerNameSet = new Set(ledgers.map(l => String(l?.name || '').trim().toLowerCase()).filter(Boolean));
+  const ledgerNameSet = new Set(ledgers.map(l => serverDecodeHtmlEntities(l?.name || '').toLowerCase()).filter(Boolean));
 
   const cleanProducts = [];
 
   for (const p of rawProducts) {
     if (!p || typeof p !== 'object') continue;
-    const name = String(p.name || '').trim();
+    const name = serverDecodeHtmlEntities(p.name || '');
     const groupFields = [p.accountGroup, p.parentGroup, p.category, p.productGroup, p.brand, p.manufacturer]
-      .map(v => String(v || '').trim())
+      .map(v => serverDecodeHtmlEntities(v || ''))
       .filter(Boolean);
     const hasNoProductPricing =
       (Number(p.sellingPrice) || 0) === 0 &&
@@ -512,7 +555,8 @@ function sanitizeAndNormalizeProductsOnDisk() {
           code: p.itemCode || p.sku || p.code || '',
           group: matchedGroup,
           openingBalance: Number(p.openingBalance) || 0,
-          openingType: p.openingType || 'Dr',
+          openingType: p.openingType || (/output|payable/i.test(name) ? 'Cr' : 'Dr'),
+          reclassifiedFromProduct: true,
           importBatchId: p.importBatchId,
           importedAt: p.importedAt || new Date().toISOString(),
         };
@@ -522,14 +566,19 @@ function sanitizeAndNormalizeProductsOnDisk() {
       continue;
     }
 
-    // Backfill oemPartNo from alias / itemCode / sku (BUSY Alias field)
-    const rawAlias = String(p.alias || p.itemAlias || p.aliasName || '').trim();
-    const rawCode = String(p.itemCode || p.sku || p.code || '').trim();
+    // Backfill oemPartNo from alias / itemCode / sku (BUSY Alias field) and decode HTML entities
+    const rawAlias = serverDecodeHtmlEntities(p.alias || p.itemAlias || p.aliasName || '');
+    const rawCode = serverDecodeHtmlEntities(p.itemCode || p.sku || p.code || '');
     const validCode = rawCode && rawCode.toLowerCase() !== name.toLowerCase() ? rawCode : '';
-    const resolvedOem = String(p.oemPartNo || rawAlias || p.partNo || p.partNumber || validCode || '').trim();
-    const resolvedAlias = String(rawAlias || resolvedOem || validCode || '').trim();
+    const resolvedOem = serverDecodeHtmlEntities(p.oemPartNo || rawAlias || p.partNo || p.partNumber || validCode || '');
+    const resolvedAlias = serverDecodeHtmlEntities(rawAlias || resolvedOem || validCode || '');
 
-    if ((resolvedOem && p.oemPartNo !== resolvedOem) || (resolvedAlias && p.alias !== resolvedAlias)) {
+    if (
+      p.name !== name ||
+      (resolvedOem && p.oemPartNo !== resolvedOem) ||
+      (resolvedAlias && p.alias !== resolvedAlias)
+    ) {
+      p.name = name;
       p.oemPartNo = resolvedOem;
       p.partNo = resolvedOem;
       p.alias = resolvedAlias;
@@ -549,6 +598,16 @@ function sanitizeAndNormalizeProductsOnDisk() {
 app.get('/api/products', (req, res) => {
   const products = sanitizeAndNormalizeProductsOnDisk();
   res.json(products);
+});
+
+app.post('/api/products/reclassify-quarantine', (req, res) => {
+  const products = sanitizeAndNormalizeProductsOnDisk();
+  const ledgers = readAllFromDir('ledgers');
+  res.json({
+    success: true,
+    cleanProductCount: products.length,
+    reclassifiedLedgers: ledgers.filter(l => l.reclassifiedFromProduct || SERVER_KNOWN_ACCOUNT_NAMES_RE.test(l.name || '')),
+  });
 });
 
 app.post('/api/products', (req, res) => {

@@ -1,22 +1,9 @@
 import { useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
 import { Home, FileText, Settings, Plus, Users, Package, BarChart3, Wallet, RefreshCw, Receipt, BookOpen, Moon, Sun, Download, X, ShoppingCart, ChevronDown, Building2, Pencil, HelpCircle, Search, Command, Bell, Calculator, HardDrive, Menu, Heart, Banknote, Laptop, Landmark, FileSpreadsheet } from 'lucide-react';
-import { getAllProfiles, saveProfile, getEnabledModules, getMenuOrder, onMenuChanged, getAllBills, getAllProducts, getStockAlertSettings, getAllClients, runUpdateNow, getLockStatus } from './store';
+import { getAllProfiles, saveProfile, getEnabledModules, getMenuOrder, onMenuChanged, getAllBills, getAllProducts, getStockAlertSettings, getAllClients, getAllSuppliers, getAllLedgers, runUpdateNow, getLockStatus } from './store';
 import { isModuleEnabled, getUpcomingFilings, countsAsSales, localToday, toLocalIsoDate, DOCS_URL, findLowStock, trackedStock } from './utils';
+import { decodeHtmlEntities } from './utils/products';
 import { orderedMenu } from './utils/businessTypes';
-// v1.10.4 — Route-level lazy loading. Prior App.jsx synchronously
-// imported all 12 views (~15k LOC combined), so a first-paint on
-// Dashboard downloaded and parsed GSTReturns (1952), InvoiceGenerator
-// (2409), IncomeTax (1038), SettingsView (1479), PrintSettings (1294)
-// etc. before the user even asked for them.
-//
-// Now:
-//  - Dashboard stays eager — it's the default landing route.
-//  - InvoiceGenerator stays eager — new-invoice is the primary action
-//    reachable from Ctrl+K / manifest shortcut / big blue button.
-//  - Every other view is React.lazy → own Vite chunk → fetched on
-//    first navigation only. Suspense fallback is a lightweight spinner.
-// Result: smaller initial JS payload; each heavy view chunk-caches
-// once fetched.
 import Dashboard from './components/Dashboard';
 import InvoiceGenerator from './components/InvoiceGenerator';
 import SetupWizard from './components/SetupWizard';
@@ -24,6 +11,8 @@ import ToastContainer, { toast } from './components/Toast';
 import ErrorBoundary from './components/ErrorBoundary';
 import ConfirmModalContainer from './components/ConfirmModal';
 import WelcomeGuide from './components/WelcomeGuide';
+import InvoiceSeriesModal from './components/InvoiceSeriesModal';
+import QuickMasterModal from './components/QuickMasterModal';
 const SettingsView = lazy(() => import('./components/SettingsView'));
 const ClientsView = lazy(() => import('./components/ClientsView'));
 const InventoryView = lazy(() => import('./components/InventoryView'));
@@ -136,8 +125,6 @@ function App() {
   // after that dismissal will re-show the banner.
   const [updateInfo, setUpdateInfo] = useState(null);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
-  const updateBannerVisible = updateInfo?.updateAvailable
-    && localStorage.getItem('freegstbill_dismissedUpdate') !== updateInfo.latest;
 
   useEffect(() => {
     let cancelled = false;
@@ -278,31 +265,55 @@ function App() {
   const [showPalette, setShowPalette] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState('');
   const [paletteIdx, setPaletteIdx] = useState(0);
-  // v1.9.4 — pre-load searchable content so Ctrl+K acts as a true global
-  // search across invoices, clients, products, and settings sections.
-  // Small cost (fires once on mount + when palette opens); big UX win.
-  const [searchCorpus, setSearchCorpus] = useState({ bills: [], clients: [], products: [] });
+  const [searchCorpus, setSearchCorpus] = useState({ bills: [], clients: [], suppliers: [], ledgers: [], products: [] });
   useEffect(() => {
     Promise.all([
       getAllBills().catch(() => []),
       getAllClients().catch(() => []),
+      getAllSuppliers().catch(() => []),
+      getAllLedgers().catch(() => []),
       getAllProducts().catch(() => []),
-    ]).then(([bills, clients, products]) => {
+    ]).then(([bills, clients, suppliers, ledgers, products]) => {
       setSearchCorpus({
         bills: bills.slice(0, 100),
         clients: clients.slice(0, 200),
-        products: products.slice(0, 200),
+        suppliers: suppliers.slice(0, 200),
+        ledgers: ledgers.slice(0, 200),
+        products: products.slice(0, 300),
       });
     });
-  }, [showPalette]); // refresh when palette opens
+  }, [showPalette]);
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
 
-  // Palette useMemo + dependent effects are declared further down, AFTER
-  // `navItems` and `handleNewInvoice` exist. Declaring them up here would
-  // throw "Cannot access 'X' before initialization" at render time because
-  // useMemo's dependency array is evaluated synchronously every render.
+  // Enterprise ERP UI State
+  const [densityMode, setDensityMode] = useState(() => {
+    try { return localStorage.getItem('gst_erp_density') || 'optionA'; } catch { return 'optionA'; }
+  });
+  useEffect(() => {
+    document.body.classList.toggle('density-compact', densityMode === 'optionB');
+    try { localStorage.setItem('gst_erp_density', densityMode); } catch { /* ignore */ }
+  }, [densityMode]);
 
-  // v1.10.69 - see runUpdateNow() in store.js for why this is no longer a link.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [globalFy, setGlobalFy] = useState('2026-27');
+  const [accountingSubTab, setAccountingSubTab] = useState('vouchers');
+  const [accountingVoucherType, setAccountingVoucherType] = useState('Payment');
+  const [purchaseSubTab, setPurchaseSubTab] = useState('bills');
+  const [showSeriesModal, setShowSeriesModal] = useState(false);
+  const [showQuickMasterModal, setShowQuickMasterModal] = useState(false);
+  const [showMoreModules, setShowMoreModules] = useState(false);
+
+  const openAccountingAt = (subTab = 'vouchers', vType = null) => {
+    setAccountingSubTab(subTab);
+    if (vType) setAccountingVoucherType(vType);
+    setCurrentView('accounting');
+  };
+
+  const openPurchasesAt = (subTab = 'bills') => {
+    setPurchaseSubTab(subTab);
+    setCurrentView('purchases');
+  };
+
   const [updating, setUpdating] = useState(false);
   const handleUpdateNow = async () => {
     setUpdating(true);
@@ -320,10 +331,6 @@ function App() {
   const dismissUpdate = () => {
     if (updateInfo?.latest) {
       localStorage.setItem('freegstbill_dismissedUpdate', updateInfo.latest);
-      // v1.10.6 — audit L10: was `setUpdateInfo(prev => prev ? { ...prev }
-      // : prev)` "to trigger re-render". No-op — `setShowUpdateModal(false)`
-      // below already re-renders, and `updateBannerVisible` reads
-      // localStorage every render so the new dismissal is picked up.
     }
     setShowUpdateModal(false);
   };
@@ -331,11 +338,6 @@ function App() {
   // Check if server is running — continuously monitors
   useEffect(() => {
     let cancelled = false;
-    // v1.10.73 - a busy or older PC can take a few seconds to answer. One
-    // slow reply used to replace the whole app with "Needs a Quick Start"
-    // mid-invoice. Once the app has loaded, it now takes 3 missed checks in a
-    // row (about 15 s) before saying the app is not running; before the first
-    // load it still says so straight away.
     let misses = 0;
 
     const checkServer = async () => {
@@ -368,7 +370,6 @@ function App() {
     };
 
     checkServer();
-    // Keep checking every 5 seconds (fast when down, normal heartbeat when up)
     retryTimer.current = setInterval(checkServer, 5000);
 
     return () => {
@@ -377,18 +378,12 @@ function App() {
     };
   }, []);
 
-  // v1.10.83 - the "Install as Desktop App" banner is gone. The browser icon
-  // it made opens only a browser window: it cannot start the app's server, so
-  // after a restart it showed "Needs a Quick Start". The installers' own
-  // Free GST Billing icon starts the server and opens the app.
-
   useEffect(() => {
     sessionStorage.setItem('gst_currentView', currentView);
   }, [currentView]);
 
   useEffect(() => {
     if (editingBill) {
-      // _printOnOpen is a one-shot request; a refresh must not print again.
       const { _printOnOpen, ...toKeep } = editingBill;
       sessionStorage.setItem('gst_editingBill', JSON.stringify(toKeep));
     } else {
@@ -401,14 +396,12 @@ function App() {
     localStorage.setItem('freegstbill_theme', darkMode ? 'dark' : 'light');
   }, [darkMode]);
 
-  // Load all saved business profiles
   useEffect(() => {
     if (serverStatus === 'online') {
       getAllProfiles().then(setAllProfiles).catch(() => {});
     }
   }, [serverStatus]);
 
-  // Close profile menu on outside click
   useEffect(() => {
     if (!showProfileMenu) return;
     const handler = (e) => {
@@ -428,34 +421,18 @@ function App() {
     setProfile(loaded);
   };
 
-  // v1.10.66 (#64 item 1) — identifies the active business for the screens
-  // keyed on it below. GSTIN first, the same rule belongsToProfile() uses to
-  // decide which records a business owns; the name covers a business that has
-  // no GSTIN yet.
   const businessKey = String(profile?.gstin || profile?.businessName || '').trim().toUpperCase();
 
-  // v1.10.66 (#59) — on a phone the sidebar is a slide-in menu. It closes as
-  // soon as something in it is chosen, so picking a page never leaves the menu
-  // covering the page that was just asked for. Opening the business list is
-  // the one exception: that choice is not finished yet.
   const [navOpen, setNavOpen] = useState(false);
   const closeNavAfterPick = (e) => {
     const picked = e.target.closest('button');
     if (picked && !picked.classList.contains('profile-switcher-btn')) setNavOpen(false);
   };
 
-  // v1.10.76 - a fresh editor for every invoice opened, so nothing (such as
-  // the stock record of the last invoice) carries over to the next one.
   const [editorKey, setEditorKey] = useState(0);
-  // v1.10.77 (#84) - sidebar auto-hide (desktop): a slim strip of icons that
-  // opens over the page when pointed at, for more room on small screens.
-  const [sidebarAutoHide, setSidebarAutoHide] = useState(() => {
+  const [sidebarAutoHide] = useState(() => {
     try { return localStorage.getItem('freegstbill_sidebarAutoHide') === '1'; } catch { return false; }
   });
-  const toggleSidebarAutoHide = (on) => {
-    setSidebarAutoHide(on);
-    try { localStorage.setItem('freegstbill_sidebarAutoHide', on ? '1' : '0'); } catch { /* private mode */ }
-  };
   const handleNewInvoice = () => {
     setEditorKey((k) => k + 1);
     sessionStorage.removeItem('gst_invoiceDraft');
@@ -470,9 +447,6 @@ function App() {
     setCurrentView('new');
   };
 
-  // v1.10.77 (#86) - Print from the Dashboard row: opens the invoice just long
-  // enough to build the same PDF the invoice screen prints (same pages, HD),
-  // prints it, and comes back.
   const handlePrintInvoice = (bill) => {
     setEditorKey((k) => k + 1);
     sessionStorage.removeItem('gst_invoiceDraft');
@@ -499,20 +473,12 @@ function App() {
     setCurrentView('new');
   };
 
-  // Pull the user's module preferences once per render. Re-mount happens
-  // when settings save, which triggers a re-render via the profile state.
   const enabledModules = getEnabledModules();
   const showIfModule = (moduleId) => isModuleEnabled(moduleId, enabledModules);
-  // v1.10.83 - a switch or a new order in Settings → Features redraws the
-  // sidebar straight away.
   const [, setMenuTick] = useState(0);
   useEffect(() => onMenuChanged(() => setMenuTick(t => t + 1)), []);
-  // Sidebar items in the saved order; hidden ones dropped. `module: null`
-  // items (Settings, Support & About, Lock app) are always shown.
   const menu = orderedMenu(getMenuOrder()).filter(m => !m.module || showIfModule(m.module));
 
-  // If the user just disabled the module backing the current view, kick them to dashboard
-  // so they don't land on an empty page after toggling.
   useEffect(() => {
     const map = { new: 'invoicing', pos: 'pos', clients: 'clients', inventory: 'inventory', accounting: 'accounting', expenses: 'expenses', purchases: 'purchases', recurring: 'recurring', receipts: 'receipts', cashbook: 'cashBook', reports: 'reports', filing: 'gstReturns', incometax: 'incomeTax' };
     const moduleForView = map[currentView];
@@ -522,8 +488,6 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentView, JSON.stringify(enabledModules)]);
 
-  // v1.10.83 - order, labels and switches come from MENU_ITEMS (utils.js);
-  // only the icons and click handlers live here.
   const NAV_EXTRAS = {
     dashboard: { icon: Home, label: 'Dashboard' },
     new: { icon: Plus, label: 'New Invoice', onClick: handleNewInvoice },
@@ -539,41 +503,28 @@ function App() {
     reports: { icon: BarChart3, label: 'Reports' },
     filing: { icon: BookOpen, label: 'GST Returns' },
     incometax: { icon: Calculator, label: 'Income Tax' },
-    // v1.10.75 - opens the online documentation, which covers every screen
-    // and stays current; the old built-in guide had fallen far behind.
     guide: { icon: HelpCircle, label: 'User Guide', onClick: openDocs },
   };
   const navItems = menu.filter(m => m.section === 'main').map(m => ({ id: m.id, ...NAV_EXTRAS[m.id] }));
   const bottomIds = menu.filter(m => m.section === 'bottom').map(m => m.id);
-  // v1.10.83 - small buttons at the top right of every screen (asked for:
-  // "dark mode button should be on top, not in the sidebar").
   const topIds = menu.filter(m => m.section === 'top').map(m => m.id);
-  // v1.10.83 - the business's own name and logo at the top of the menu, when
-  // it says so (Settings → Branding, or the first-run setup).
-  // The profile comes from the server a moment after the first paint; until
-  // then the menu uses the name and logo it showed last time (kept in this
-  // browser), so a refresh does not flash "GST Billing" before the logo.
   const brand = profile || menuBrandCache;
   const ownBrand = !!brand?.showInMenu && !!String(brand?.businessName || '').trim();
   const topActions = topIds.map(id => ({
     guide: (
       <button key={id} type="button" className="topbar-btn" onClick={openDocs}
         title="User guide (opens in your browser)" aria-label="User guide">
-        <HelpCircle size={18} />
+        <HelpCircle size={16} />
       </button>
     ),
-    /* Opens the list of overdue / due-soon invoices, GST filing deadlines and
-       low-stock items, each a click away from the page that fixes it. */
     notifications: (
       <button key={id} type="button" className="topbar-btn" onClick={() => setShowNotifs(s => !s)}
         title="Notifications" aria-label={notifTotal > 0 ? `Notifications: ${notifTotal}` : 'Notifications'}>
-        <Bell size={18} />
+        <Bell size={16} />
         {notifTotal > 0 && <span className="topbar-badge">{notifTotal > 99 ? '99+' : notifTotal}</span>}
       </button>
     ),
-    /* v1.10.80 (#98) - only when a PIN is set. */
     lock: <LockButton key={id} className="topbar-btn" label={null} />,
-    /* v1.10.83 - Offline mode on / off, and what it changes. */
     offline: <OfflineModeButton key={id} className="topbar-btn" onOpenSettings={() => {
       try { sessionStorage.setItem('gst_settingsTab', 'section-privacy'); } catch { /* storage blocked */ }
       setCurrentView('settings');
@@ -581,44 +532,45 @@ function App() {
     darkMode: (
       <button key={id} type="button" className="topbar-btn" onClick={() => setDarkMode(d => !d)}
         title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'} aria-label={darkMode ? 'Light mode' : 'Dark mode'}>
-        {darkMode ? <Sun size={18} /> : <Moon size={18} />}
+        {darkMode ? <Sun size={16} /> : <Moon size={16} />}
       </button>
     ),
   })[id]);
 
-  // Command palette actions — declared here (not earlier) because the deps
-  // array references `navItems` and `handleNewInvoice`, which are consts.
-  // Reading a const before its declaration triggers a Temporal Dead Zone
-  // ReferenceError ("Cannot access 'X' before initialization") at runtime.
+  // Global "Go To" Command Palette actions (Alt+G / Ctrl+K)
   const paletteActions = useMemo(() => {
     const acts = [
-      { label: 'New Invoice', hint: 'Ctrl+N', category: 'action', run: () => { handleNewInvoice(); } },
+      { label: 'Sales Tax Invoice (B2B / B2C)', hint: 'F8', category: 'voucher', run: () => handleNewInvoice() },
+      { label: 'POS Counter Fast Billing', hint: 'Alt+P', category: 'voucher', run: () => setCurrentView('pos') },
+      { label: 'Purchase Bill / Supplier Inward', hint: 'F9', category: 'voucher', run: () => openPurchasesAt('bills') },
+      { label: 'AI/OCR Purchase Bill Capture Workbench', hint: 'Alt+U', category: 'voucher', run: () => openPurchasesAt('ocr') },
+      { label: 'Contra Voucher (Cash ↔ Bank Transfer)', hint: 'F4', category: 'voucher', run: () => openAccountingAt('vouchers', 'Contra') },
+      { label: 'Payment Voucher (Supplier / Expense)', hint: 'F5', category: 'voucher', run: () => openAccountingAt('vouchers', 'Payment') },
+      { label: 'Receipt Voucher (Customer / Income)', hint: 'F6', category: 'voucher', run: () => openAccountingAt('vouchers', 'Receipt') },
+      { label: 'Journal Voucher (Adjustment Entry)', hint: 'F7', category: 'voucher', run: () => openAccountingAt('vouchers', 'Journal') },
+      { label: 'Instant Master Creation (+ Party / Ledger / Spare Part)', hint: 'Alt+C', category: 'action', run: () => setShowQuickMasterModal(true) },
+      { label: 'Manage Invoice & Voucher Numbering Series', hint: 'Rule 46', category: 'action', run: () => setShowSeriesModal(true) },
+      { label: 'Go to Executive Dashboard', hint: 'Alt+D', category: 'nav', run: () => setCurrentView('dashboard') },
+      { label: 'Go to Parties, General Ledgers & Bank Reconciliation (BRS)', hint: 'Alt+L', category: 'nav', run: () => openAccountingAt('ledgers') },
+      { label: 'Go to Spare-Parts Catalog & Stock Master', hint: 'Alt+I', category: 'nav', run: () => setCurrentView('inventory') },
+      { label: 'Go to Trial Balance', hint: 'Alt+T', category: 'report', run: () => openAccountingAt('trial-balance') },
+      { label: 'Go to Trading & Profit & Loss A/c', hint: 'Alt+F', category: 'report', run: () => openAccountingAt('profit-loss') },
+      { label: 'Go to Balance Sheet (Schedule III)', hint: 'Alt+B', category: 'report', run: () => openAccountingAt('balance-sheet') },
+      { label: 'Go to GST Compliance Hub (GSTR-1 / 2B / 3B / HSN)', hint: 'Alt+S', category: 'report', run: () => setCurrentView('filing') },
+      { label: 'Open BUSY .DAT Migration Wizard', hint: 'Ctrl+Shift+B', category: 'action', run: () => setShowBusyModal(true) },
     ];
     navItems.forEach(item => {
-      if (item.id === 'new') return; // already covered above
+      if (['new', 'pos', 'inventory', 'accounting', 'purchases', 'filing', 'dashboard'].includes(item.id)) return;
       acts.push({ label: `Go to ${item.label}`, hint: '', category: 'nav', run: item.onClick || (() => setCurrentView(item.id)) });
     });
-    acts.push({ label: 'Go to Settings', hint: '', category: 'nav', run: () => setCurrentView('settings') });
-    // v1.10.74 - Control Panel has its own sidebar button but was missing here.
-    // v1.10.83 - and, like every menu item, not when it is switched off.
+    acts.push({ label: 'Go to Settings & Configuration', hint: 'F11', category: 'nav', run: () => setCurrentView('settings') });
     if (bottomIds.includes('controlpanel')) acts.push({ label: 'Go to Control Panel', hint: '', category: 'nav', run: () => setCurrentView('controlpanel') });
     acts.push({ label: 'Go to Support & About', hint: '', category: 'nav', run: () => setCurrentView('support') });
-    if (topIds.includes('guide')) acts.push({ label: 'Open the User Guide', hint: '', category: 'help', run: openDocs });
-    acts.push({ label: 'Toggle dark mode', hint: '', category: 'action', run: () => setDarkMode(d => !d) });
-    acts.push({ label: 'Show keyboard shortcuts', hint: 'Ctrl+/', category: 'help', run: () => setShowShortcutsHelp(true) });
-    if (updateInfo?.updateAvailable) {
-      acts.push({ label: `View update — v${updateInfo.latest}`, hint: '', category: 'update', run: () => setShowUpdateModal(true) });
-    }
-    // v1.9.4 — cross-app search: invoices, clients, products
-    // v1.10.5 — audit H24 fix. Prior code dispatched
-    // `CustomEvent('fgsb-open-bill', { detail: b.id })` but no one
-    // listened for it — selecting an invoice in the palette silently
-    // dropped the ID and just landed on Dashboard. Now: reuse
-    // handleEditInvoice() directly, which is already the canonical way
-    // to open a bill for editing (works from Dashboard row-click too).
+    acts.push({ label: 'Show Keyboard Shortcuts Reference', hint: 'Ctrl+/', category: 'help', run: () => setShowShortcutsHelp(true) });
+
     searchCorpus.bills.forEach(b => {
       acts.push({
-        label: `📄 ${b.invoiceNumber || 'INV-?'} — ${b.clientName || 'No client'}`,
+        label: `📄 ${b.invoiceNumber || 'INV-?'} — ${decodeHtmlEntities(b.clientName || 'Walk-in')}`,
         hint: b.invoiceDate ? new Date(b.invoiceDate).toLocaleDateString('en-IN') : '',
         category: 'invoice',
         run: () => handleEditInvoice(b),
@@ -626,65 +578,56 @@ function App() {
     });
     searchCorpus.clients.forEach(c => {
       acts.push({
-        label: `👤 ${c.name} — client${c.gstin ? ' · GSTIN: ' + c.gstin : ''}`,
-        hint: c.phone || c.email || '',
+        label: `👤 ${decodeHtmlEntities(c.name)} — Customer (Debtor)${c.gstin ? ' · ' + c.gstin : ''}`,
+        hint: c.phone || c.state || 'Sundry Debtors',
         category: 'client',
-        run: () => setCurrentView('clients'),
+        run: () => openAccountingAt('ledgers'),
       });
     });
-    // v1.10.83 - a product result opens Products, so none while it is hidden.
-    if (navItems.some(i => i.id === 'inventory')) searchCorpus.products.forEach(p => {
+    searchCorpus.suppliers.forEach(s => {
       acts.push({
-        label: `📦 ${p.name} — product${p.hsn ? ' · HSN: ' + p.hsn : ''}`,
-        hint: trackedStock(p) === null ? '' : trackedStock(p) + ' in stock',
+        label: `🏭 ${decodeHtmlEntities(s.name)} — Supplier (Creditor)${s.gstin ? ' · ' + s.gstin : ''}`,
+        hint: s.phone || s.state || 'Sundry Creditors',
+        category: 'supplier',
+        run: () => openAccountingAt('ledgers'),
+      });
+    });
+    searchCorpus.ledgers.forEach(l => {
+      acts.push({
+        label: `🏛️ ${decodeHtmlEntities(l.name)} — Ledger (${l.group || 'General'})`,
+        hint: `${l.openingType || 'Dr'} ₹${Number(l.openingBalance || 0).toLocaleString('en-IN')}`,
+        category: 'ledger',
+        run: () => openAccountingAt('ledgers'),
+      });
+    });
+    if (navItems.some(i => i.id === 'inventory')) searchCorpus.products.forEach(p => {
+      const oem = p.oemPartNo || p.sku || '';
+      acts.push({
+        label: `🔧 ${decodeHtmlEntities(p.name)}${oem ? ` [${oem}]` : ''}${p.hsn ? ' · HSN: ' + p.hsn : ''}`,
+        hint: trackedStock(p) === null ? '' : trackedStock(p) + ' Nos in stock',
         category: 'product',
         run: () => setCurrentView('inventory'),
       });
     });
-    // Settings sections (jump to specific area)
-    // v1.10.74 - these all used to just open Settings at the top. Each now
-    // names its section id; after Settings mounts (it's lazy-loaded, so retry
-    // briefly) we click that section's "Jump to" chip, which already scrolls
-    // below the sticky bars.
-    const openSettingsAt = (sectionId) => {
-      setCurrentView('settings');
-      let tries = 0;
-      const jump = () => {
-        const chip = document.querySelector(`.settings-jumpnav a[href="#${sectionId}"]`);
-        if (chip && document.getElementById(sectionId)) chip.click();
-        else if (++tries < 30) setTimeout(jump, 100);
-      };
-      setTimeout(jump, 50);
-    };
-    const settingsJumps = [
-      ['Company profile', 'section-company'], ['Payment accounts', 'section-company'],
-      ['Print & PDF Settings', 'section-print'], ['PDF Style Editor', 'section-print'],
-      ['Business type presets', 'section-print'], ['Section labels', 'section-print'],
-      ['Watermarks', 'section-print'], ['Multi-copy print', 'section-print'],
-      ['Digital signature', 'section-company'], ['Company letterhead', 'section-print'],
-      ['Business type', 'section-biztype'], ['Features', 'section-modules'], ['Region preference', 'section-region'],
-      ['Google Drive backup', 'section-cloud'], ['App updates', 'section-updates'],
-    ];
-    settingsJumps.forEach(([s, sectionId]) => {
-      acts.push({ label: `⚙️ Settings → ${s}`, hint: '', category: 'settings', run: () => openSettingsAt(sectionId) });
-    });
     return acts;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navItems, bottomIds, topIds, updateInfo, handleNewInvoice, searchCorpus]);
 
   const filteredPalette = paletteActions.filter(a =>
-    !paletteQuery.trim() || a.label.toLowerCase().includes(paletteQuery.toLowerCase())
+    !paletteQuery.trim() || a.label.toLowerCase().includes(paletteQuery.toLowerCase()) || (a.hint && a.hint.toLowerCase().includes(paletteQuery.toLowerCase()))
   );
 
-  // Global keyboard shortcuts including standard Accounting / Billing F-keys (F1–F12).
+  // Standardized Enterprise Keyboard Shortcuts (TallyPrime / BUSY Standard)
   useEffect(() => {
     const onKey = (e) => {
       const tag = (e.target?.tagName || '').toLowerCase();
-      const editable = tag === 'input' || tag === 'textarea' || e.target?.isContentEditable;
+      const editable = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target?.isContentEditable;
 
       // Function keys F1-F12
       if (e.key === 'F1') {
         e.preventDefault();
-        setShowShortcutsHelp(s => !s);
+        if (allProfiles.length > 1) setShowProfileMenu(v => !v);
+        else setShowShortcutsHelp(s => !s);
         return;
       }
       if (e.key === 'F2') {
@@ -692,39 +635,34 @@ function App() {
         handleNewInvoice();
         return;
       }
-      if (e.key === 'F3') {
-        e.preventDefault();
-        setCurrentView('purchases');
-        return;
-      }
       if (e.key === 'F4') {
         e.preventDefault();
-        setCurrentView('clients');
+        openAccountingAt('vouchers', 'Contra');
         return;
       }
       if (e.key === 'F5') {
         e.preventDefault();
-        setCurrentView('inventory');
+        openAccountingAt('vouchers', 'Payment');
         return;
       }
       if (e.key === 'F6') {
         e.preventDefault();
-        setCurrentView('accounting');
+        openAccountingAt('vouchers', 'Receipt');
         return;
       }
       if (e.key === 'F7') {
         e.preventDefault();
-        setCurrentView('accounting');
+        openAccountingAt('vouchers', 'Journal');
         return;
       }
       if (e.key === 'F8') {
         e.preventDefault();
-        setCurrentView('accounting');
+        handleNewInvoice();
         return;
       }
       if (e.key === 'F9') {
         e.preventDefault();
-        setCurrentView('accounting');
+        openPurchasesAt('bills');
         return;
       }
       if (e.key === 'F10') {
@@ -734,7 +672,7 @@ function App() {
       }
       if (e.key === 'F11') {
         e.preventDefault();
-        setCurrentView('dashboard');
+        setCurrentView('settings');
         return;
       }
       if (e.key === 'F12') {
@@ -743,10 +681,80 @@ function App() {
         return;
       }
 
+      // Alt + Key Enterprise Navigation & Voucher Shortcuts
+      if (e.altKey && !e.ctrlKey && !e.metaKey) {
+        const k = (e.key || '').toLowerCase();
+        if (k === 'g') {
+          e.preventDefault();
+          setShowPalette(p => !p);
+          setPaletteQuery('');
+          setPaletteIdx(0);
+          return;
+        }
+        if (k === 'c') {
+          e.preventDefault();
+          setShowQuickMasterModal(true);
+          return;
+        }
+        if (k === 'p') {
+          e.preventDefault();
+          setCurrentView('pos');
+          return;
+        }
+        if (k === 'u') {
+          e.preventDefault();
+          openPurchasesAt('ocr');
+          return;
+        }
+        if (k === 'd') {
+          e.preventDefault();
+          setCurrentView('dashboard');
+          return;
+        }
+        if (k === 'l') {
+          e.preventDefault();
+          openAccountingAt('ledgers');
+          return;
+        }
+        if (k === 'i') {
+          e.preventDefault();
+          setCurrentView('inventory');
+          return;
+        }
+        if (k === 't') {
+          e.preventDefault();
+          openAccountingAt('trial-balance');
+          return;
+        }
+        if (k === 'f') {
+          e.preventDefault();
+          openAccountingAt('profit-loss');
+          return;
+        }
+        if (k === 'b') {
+          e.preventDefault();
+          openAccountingAt('balance-sheet');
+          return;
+        }
+        if (k === 's') {
+          e.preventDefault();
+          setCurrentView('filing');
+          return;
+        }
+      }
+
       const mod = e.ctrlKey || e.metaKey;
       if (!mod) return;
 
-      if (e.key === 'k' || e.key === 'K') {
+      if (e.key === 'b' || e.key === 'B') {
+        if (e.shiftKey) {
+          e.preventDefault();
+          setShowBusyModal(s => !s);
+        } else {
+          e.preventDefault();
+          setSidebarCollapsed(c => !c);
+        }
+      } else if (e.key === 'k' || e.key === 'K') {
         e.preventDefault();
         setShowPalette(p => !p);
         setPaletteQuery('');
@@ -755,36 +763,19 @@ function App() {
         e.preventDefault();
         setShowShortcutsHelp(s => !s);
       } else if ((e.key === 'l' || e.key === 'L') && e.shiftKey) {
-        // v1.10.80 (#98) - lock now; does nothing when no PIN is set.
         e.preventDefault();
         getLockStatus().then((st) => { if (st?.enabled) lockNow(); }).catch(() => {});
       } else if ((e.key === 'n' || e.key === 'N') && !editable) {
         e.preventDefault();
         handleNewInvoice();
-      } else if ((e.key === 'b' || e.key === 'B') && e.shiftKey) {
-        e.preventDefault();
-        setShowBusyModal(s => !s);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [handleNewInvoice]);
+  }, [handleNewInvoice, allProfiles.length]);
 
-  // v1.9.4 — Accessibility hooks (v1.10.4/1.10.6 updated):
-  //   1. Mirror `title` → `aria-label` on every icon button that lacks one.
-  //      Runs on mount + via a MutationObserver when the DOM adds new
-  //      icon buttons (bulk toolbars, modals, etc.). See M15.
-  //   2. Global ESC handler for any open `.modal-overlay` — clicks the
-  //      backdrop (which triggers the overlay's own close). No CSS
-  //      class is added; the earlier `.esc-closable` idea was never
-  //      implemented, comment cleaned up (audit L7).
   useEffect(() => {
-    // v1.10.4 — audit M15. Prior code polled the DOM every 3 seconds
-    // to mirror title→aria-label on new .icon-btn elements. Constant
-    // idle-time work for a paper-thin accessibility win. Replaced with
-    // a MutationObserver that fires ONLY when new buttons enter the
-    // DOM. Existing buttons get the treatment once at mount.
     const mirrorTitleToAria = (root = document) => {
       root.querySelectorAll('button.icon-btn[title]:not([aria-label])').forEach(btn => {
         btn.setAttribute('aria-label', btn.getAttribute('title'));
@@ -795,7 +786,7 @@ function App() {
       for (const m of mutations) {
         if (m.addedNodes.length) {
           for (const node of m.addedNodes) {
-            if (node.nodeType === 1) {  // Element
+            if (node.nodeType === 1) {
               if (node.matches?.('button.icon-btn[title]:not([aria-label])')) {
                 node.setAttribute('aria-label', node.getAttribute('title'));
               }
@@ -807,7 +798,6 @@ function App() {
     });
     observer.observe(document.body, { childList: true, subtree: true });
 
-    // Global ESC → click the topmost modal-overlay (dismisses it).
     const onEsc = (e) => {
       if (e.key !== 'Escape') return;
       const overlays = Array.from(document.querySelectorAll('.modal-overlay'));
@@ -820,8 +810,6 @@ function App() {
     return () => { observer.disconnect(); window.removeEventListener('keydown', onEsc); };
   }, [showPalette]);
 
-  // Palette-only arrow / Enter / Esc nav. Filtered list dep keeps the
-  // handler in sync with the user's current query.
   useEffect(() => {
     if (!showPalette) return;
     const onKey = (e) => {
@@ -848,23 +836,12 @@ function App() {
             Your data is <strong>100% safe</strong> on your computer — nothing is lost.
             The app just needs to be started once.
           </p>
-          {/* v1.10.69 - there was an "Open GST Billing" button here, linking to
-              freegstbill://start. Only the old Install FreeGSTBill.bat ever
-              registered that protocol, and it stopped shipping in v1.10.44, so
-              on every current install the button did nothing at all. There is
-              also nothing it could do: a web page cannot start a program, and
-              this screen is being served from the offline cache precisely
-              because the server is not running. The steps below are the only
-              real answer, so they are no longer the fallback. See ERR-019. */}
           <div className="server-down-steps">
             <p className="server-down-hint">How to start it:</p>
             <ol>
               <li>Double-click the <strong>Free GST Billing</strong> icon on your Desktop (the blue <strong>B</strong>)</li>
               <li>Or search <strong>"Free GST Billing"</strong> in the Start Menu</li>
             </ol>
-            {/* v1.10.83 - an icon made by the browser ("Install as Desktop App",
-                removed in this version) opens this window but cannot start the
-                app. Say so, or people keep clicking it. */}
             <p className="server-down-hint">Opened this from a Chrome or Edge app icon? That icon cannot start the app. Use the Free GST Billing icon instead; you can remove the other one (right-click it, then Uninstall).</p>
           </div>
           <p className="server-down-safe">All your invoices, clients, and data are safely stored on your computer. They are never deleted or shared.</p>
@@ -890,11 +867,6 @@ function App() {
     );
   }
 
-  // v1.10.33 — "Finish setup" bottom-right pill. Shown when the user
-  // hit Skip on the wizard (onboardingSkipped=true) so they can come
-  // back later without hunting through Settings. Hidden after they
-  // finish setup (finish() clears the flag) or if they explicitly said
-  // "None of these — I'll configure manually".
   const showResumeSetupPill = (() => {
     try {
       const ps = getPrintSettings();
@@ -902,323 +874,803 @@ function App() {
     } catch { return false; }
   })();
 
+  const activeCompanyName = decodeHtmlEntities(profile?.businessName || 'PRAGYAN ENTERPRISES');
+  const activeCompanyGstin = profile?.gstin || '08AABCP1234R1Z5';
+
   return (
-    <div className={`app-layout${sidebarAutoHide ? ' sidebar-autohide' : ''}`}>
-      {showWizard && <SetupWizard onClose={() => setShowWizard(false)} />}
-      {showResumeSetupPill && (
-        <button type="button"
-          onClick={() => setShowWizard(true)}
-          title="Come back to the setup wizard — pick a business type, paper size, and language."
-          style={{
-            // Above the docked Save bar on Settings, so it never covers Save.
-            position: 'fixed', bottom: currentView === 'settings' ? '5.5rem' : '1.25rem', right: '1.25rem', zIndex: 9998,
-            padding: '0.6rem 1rem', borderRadius: 999,
-            background: 'var(--primary)', color: '#fff', border: 'none',
-            fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer',
-            boxShadow: '0 6px 20px rgba(30,64,175,0.35), 0 2px 4px rgba(0,0,0,0.15)',
-            display: 'flex', alignItems: 'center', gap: '0.4rem',
-          }}>
-          ✨ Finish setup
-        </button>
-      )}
-      {/* v1.10.66 (#59) — phone-only top bar with the menu button. CSS hides it
-          on wider screens, where the sidebar is always shown. */}
-      <div className="mobile-topbar">
-        <button type="button" className="mobile-topbar-btn" onClick={() => setNavOpen(true)}
-          aria-label="Open menu" aria-expanded={navOpen}>
-          <Menu size={22} />
-        </button>
-        <span className="mobile-topbar-title">GST Billing</span>
-        <span className="mobile-topbar-business">{profile?.businessName || ''}</span>
-        {topActions}
-      </div>
-      {navOpen && <div className="sidebar-backdrop" onClick={() => setNavOpen(false)} aria-hidden="true" />}
-      <div className={`sidebar${navOpen ? ' sidebar-open' : ''}`} onClick={closeNavAfterPick}>
-        <div className="sidebar-brand">
-          <div className={`sidebar-logo${ownBrand && brand.logo ? ' sidebar-logo-own' : ''}`}>
-            {ownBrand && brand.logo ? <img src={brand.logo} alt="" />
-              : ownBrand ? <span className="sidebar-logo-letter">{brand.businessName.trim().charAt(0).toUpperCase()}</span>
-                : <FileText size={22} />}
-          </div>
-          {/* "by DiceCodes" always stays, under their name too. "Free forever" is
-              in the top bar; on a phone (no top bar) it stays here. */}
-          <div className="sidebar-brand-text">
-            <h2 className={`sidebar-title${ownBrand ? ' sidebar-title-own' : ''}`} title={ownBrand ? `${brand.businessName} - Free GST Billing` : undefined}>{ownBrand ? brand.businessName : 'GST Billing'}</h2>
-            <p className="sidebar-subtitle" title="Free forever. Works on this computer, even offline. No tracking, no ads."><span className="sidebar-free sidebar-free-phone">Free forever<br /></span>by DiceCodes</p>
-          </div>
-          {/* Auto-hide as a ☰ button (was a text checkbox): pressed = the menu
-              shrinks to icons and opens when pointed at. */}
-          <button type="button" className={`sidebar-autohide-toggle${sidebarAutoHide ? ' on' : ''}`}
-            aria-pressed={sidebarAutoHide} aria-label="Auto-hide menu"
-            title={sidebarAutoHide ? 'Keep this menu open' : 'Auto-hide this menu: icons only, it opens when you point at it'}
-            onClick={(e) => { e.stopPropagation(); toggleSidebarAutoHide(!sidebarAutoHide); }}>
-            <Menu size={18} />
+    <div className="erp-shell-wrapper">
+      {/* 1. Top Enterprise Context Bar (48px height) */}
+      <header className="erp-context-bar">
+        {/* Left: Sidebar Collapse Toggle (Ctrl+B), Brand Logo, Full Company Selector Pill (F1), Global FY Selector */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+          <button
+            type="button"
+            onClick={() => setSidebarCollapsed(c => !c)}
+            title="Toggle Left Navigation Sidebar (Ctrl+B)"
+            style={{
+              background: '#1E293B',
+              color: '#E2E8F0',
+              border: '1px solid #334155',
+              borderRadius: '5px',
+              padding: '5px 8px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '5px',
+              cursor: 'pointer',
+              fontSize: '11.5px',
+              fontWeight: 600,
+            }}
+          >
+            <Menu size={15} />
+            <span style={{ fontFamily: 'var(--erp-font-mono)', fontSize: '10px', color: '#94A3B8' }}>Ctrl+B</span>
           </button>
-        </div>
 
-        <div className="profile-switcher" ref={profileMenuRef} style={{ position: 'relative' }}>
-          <div className="profile-switcher-row">
-            <button
-              className="profile-switcher-btn"
-              onClick={() => allProfiles.length > 1 && setShowProfileMenu(v => !v)}
-              title={allProfiles.length > 1 ? 'Switch business profile' : profile?.businessName || 'My Business'}
-              style={{ cursor: allProfiles.length > 1 ? 'pointer' : 'default' }}
+          <div
+            onClick={() => setCurrentView('dashboard')}
+            style={{ display: 'flex', alignItems: 'center', gap: '7px', cursor: 'pointer', paddingRight: '4px' }}
+          >
+            <div
+              style={{
+                width: '28px',
+                height: '28px',
+                borderRadius: '6px',
+                background: 'linear-gradient(135deg, #2563EB, #1D4ED8)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#FFFFFF',
+                fontWeight: 800,
+                fontSize: '13px',
+              }}
             >
-              <Building2 size={14} />
-              <span className="profile-switcher-name">{profile?.businessName || 'My Business'}</span>
-              {allProfiles.length > 1 && <ChevronDown size={13} style={{ marginLeft: 'auto', opacity: 0.6 }} />}
-            </button>
-            <button
-              className="profile-switcher-edit"
-              onClick={() => { setShowProfileMenu(false); setCurrentView('settings'); }}
-              title="Edit business profile"
-            >
-              <Pencil size={13} />
-            </button>
-          </div>
-          {showProfileMenu && (
-            <div className="profile-switcher-menu">
-              {allProfiles.map(bp => (
-                <button
-                  key={bp.id || bp.businessName}
-                  className={`profile-switcher-item${bp.businessName?.trim().toLowerCase() === profile?.businessName?.trim().toLowerCase() ? ' active' : ''}`}
-                  onClick={() => handleSwitchProfile(bp)}
-                >
-                  {bp.businessName}
-                </button>
-              ))}
-              <button
-                className="profile-switcher-item profile-switcher-manage"
-                onClick={() => { setShowProfileMenu(false); setCurrentView('settings'); }}
-              >
-                Manage profiles...
-              </button>
+              {ownBrand && brand.logo ? (
+                <img src={brand.logo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '6px' }} />
+              ) : (
+                'B'
+              )}
             </div>
-          )}
-        </div>
+            <div style={{ lineHeight: 1.15 }}>
+              <div style={{ fontWeight: 700, fontSize: '12.5px', color: '#FFFFFF', whiteSpace: 'nowrap' }}>
+                GST Billing ERP
+              </div>
+              <div style={{ fontSize: '10px', color: '#94A3B8', whiteSpace: 'nowrap' }}>by DiceCodes</div>
+            </div>
+          </div>
 
-        <nav className="sidebar-nav">
-          {navItems.map(item => (
+          {/* Full Company Selector Pill (F1) */}
+          <div ref={profileMenuRef} style={{ position: 'relative' }}>
             <button
-              key={item.id}
-              className={`nav-btn ${currentView === item.id ? 'nav-btn-active' : ''}`}
-              onClick={item.onClick || (() => setCurrentView(item.id))}
+              type="button"
+              onClick={() => setShowProfileMenu(v => !v)}
+              title="Switch or Edit Company Profile (F1)"
+              style={{
+                background: '#1E293B',
+                border: '1px solid #334155',
+                borderRadius: '6px',
+                padding: '4px 10px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                color: '#F8FAFC',
+                cursor: 'pointer',
+              }}
             >
-              <item.icon size={18} /> {item.label}
-            </button>
-          ))}
-          <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-            {/* Update-available banner — only shows when GitHub has a newer version
-                AND the user hasn't already dismissed THIS specific version. New
-                releases re-show the banner. Click to view notes + update. */}
-            {updateBannerVisible && (
-              <button
-                className="nav-btn"
-                onClick={() => setShowUpdateModal(true)}
-                title={`v${updateInfo.latest} is available`}
+              <Building2 size={14} color="#38BDF8" />
+              <span style={{ fontWeight: 700, fontSize: '12.5px', letterSpacing: '0.01em', whiteSpace: 'nowrap' }}>
+                {activeCompanyName}
+              </span>
+              <span
                 style={{
-                  background: 'var(--info-bg)',
-                  borderColor: 'var(--info-border)',
-                  color: 'var(--info-text)',
+                  background: '#0F172A',
+                  color: '#38BDF8',
+                  border: '1px solid #334155',
+                  padding: '1px 6px',
+                  borderRadius: '4px',
+                  fontFamily: 'var(--erp-font-mono)',
+                  fontSize: '10.5px',
                   fontWeight: 600,
-                  position: 'relative',
                 }}
               >
-                <Download size={18} />
-                <span style={{ flex: 1, textAlign: 'left' }}>
-                  Update to v{updateInfo.latest}
-                </span>
-                <span style={{
-                  width: 8, height: 8, borderRadius: '50%',
-                  background: '#f59e0b', boxShadow: '0 0 0 3px rgba(245,158,11,0.25)',
-                  flexShrink: 0,
-                }} />
-              </button>
+                {activeCompanyGstin}
+              </span>
+              <span style={{ fontFamily: 'var(--erp-font-mono)', fontSize: '10px', color: '#94A3B8' }}>F1</span>
+              <ChevronDown size={13} color="#94A3B8" />
+            </button>
+            {showProfileMenu && (
+              <div className="profile-switcher-menu" style={{ top: '38px', left: 0, minWidth: '260px' }}>
+                {allProfiles.map(bp => (
+                  <button
+                    key={bp.id || bp.businessName}
+                    className={`profile-switcher-item${bp.businessName?.trim().toLowerCase() === profile?.businessName?.trim().toLowerCase() ? ' active' : ''}`}
+                    onClick={() => handleSwitchProfile(bp)}
+                  >
+                    {decodeHtmlEntities(bp.businessName)} {bp.gstin ? `(${bp.gstin})` : ''}
+                  </button>
+                ))}
+                <button
+                  className="profile-switcher-item profile-switcher-manage"
+                  onClick={() => { setShowProfileMenu(false); setCurrentView('settings'); }}
+                >
+                  ⚙️ Edit Company & GSTIN Settings...
+                </button>
+              </div>
             )}
-            {/* BUSY .DAT Import button */}
+          </div>
+
+          {/* Global Financial Year Selector */}
+          <select
+            value={globalFy}
+            onChange={(e) => setGlobalFy(e.target.value)}
+            aria-label="Global Financial Year"
+            title={`Financial Year ${globalFy} (01-Apr to 31-Mar)`}
+            style={{
+              background: '#1E293B',
+              color: '#E2E8F0',
+              border: '1px solid #334155',
+              borderRadius: '6px',
+              padding: '4px 22px 4px 8px',
+              fontSize: '11px',
+              fontFamily: 'var(--erp-font-mono)',
+              fontWeight: 600,
+              cursor: 'pointer',
+              height: '28px',
+              width: 'auto',
+              flexShrink: 0,
+            }}
+          >
+            <option value="2026-27">FY 2026-27</option>
+            <option value="2025-26">FY 2025-26</option>
+            <option value="2024-25">FY 2024-25</option>
+          </select>
+        </div>
+
+        {/* Center: Global "Go To" Command Palette Trigger (Alt+G / Ctrl+K) */}
+        <button
+          type="button"
+          onClick={() => {
+            setShowPalette(true);
+            setPaletteQuery('');
+            setPaletteIdx(0);
+          }}
+          title="Global Go To Command Palette (Alt+G or Ctrl+K)"
+          style={{
+            background: '#1E293B',
+            border: '1px solid #334155',
+            borderRadius: '6px',
+            padding: '4px 10px',
+            height: '28px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px',
+            color: '#CBD5E1',
+            cursor: 'pointer',
+            whiteSpace: 'nowrap',
+            flexShrink: 0,
+          }}
+        >
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '11.5px', whiteSpace: 'nowrap' }}>
+            <Search size={13} color="#38BDF8" />
+            <span>Go To...</span>
+          </span>
+          <span
+            style={{
+              background: '#0F172A',
+              color: '#38BDF8',
+              border: '1px solid #334155',
+              padding: '1px 5px',
+              borderRadius: '4px',
+              fontFamily: 'var(--erp-font-mono)',
+              fontSize: '10px',
+              fontWeight: 700,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            Alt+G
+          </span>
+        </button>
+
+        {/* Right: Live Option A / Option B Density Switcher, + Series, + Master (Alt+C) & Actions */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+          {/* Live Design Direction Switcher (Option A vs Option B) */}
+          <div
+            style={{
+              display: 'inline-flex',
+              background: '#1E293B',
+              border: '1px solid #334155',
+              borderRadius: '6px',
+              padding: '2px',
+            }}
+            title="Live Design Direction Switcher: Option A (Modern ERP 34px) vs Option B (Compact Accounting Grid 26px)"
+          >
+            <button
+              type="button"
+              onClick={() => setDensityMode('optionA')}
+              style={{
+                background: densityMode === 'optionA' ? '#2563EB' : 'transparent',
+                color: densityMode === 'optionA' ? '#FFFFFF' : '#94A3B8',
+                border: 'none',
+                borderRadius: '4px',
+                padding: '3px 7px',
+                fontSize: '11px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              A · Modern
+            </button>
+            <button
+              type="button"
+              onClick={() => setDensityMode('optionB')}
+              style={{
+                background: densityMode === 'optionB' ? '#2563EB' : 'transparent',
+                color: densityMode === 'optionB' ? '#FFFFFF' : '#94A3B8',
+                border: 'none',
+                borderRadius: '4px',
+                padding: '3px 7px',
+                fontSize: '11px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              B · Compact
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setShowSeriesModal(true)}
+            title="Configure Multiple Invoice & Voucher Series (CGST Rule 46)"
+            style={{
+              background: '#1E293B',
+              color: '#E2E8F0',
+              border: '1px solid #334155',
+              borderRadius: '6px',
+              padding: '4px 9px',
+              fontSize: '11.5px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            + Series
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setShowQuickMasterModal(true)}
+            title="Instant Party / Ledger / Spare-Part Master Creation (Alt+C)"
+            style={{
+              background: '#15803D',
+              color: '#FFFFFF',
+              border: '1px solid #16A34A',
+              borderRadius: '6px',
+              padding: '4px 10px',
+              fontSize: '11.5px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '5px',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <span>+ Master</span>
+            <span style={{ fontFamily: 'var(--erp-font-mono)', fontSize: '10px', background: 'rgba(0,0,0,0.25)', padding: '1px 4px', borderRadius: '3px' }}>
+              Alt+C
+            </span>
+          </button>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+            {topActions}
+          </div>
+        </div>
+      </header>
+
+      {/* 2. Persistent Function-Key Voucher Bar (32px height, TallyPrime / BUSY Standard) */}
+      <div className="erp-fkey-bar" role="toolbar" aria-label="Accounting Function Key Shortcuts">
+        <button
+          type="button"
+          className={`erp-fkey-btn ${currentView === 'accounting' && accountingSubTab === 'vouchers' && accountingVoucherType === 'Contra' ? 'active' : ''}`}
+          onClick={() => openAccountingAt('vouchers', 'Contra')}
+        >
+          <span className="erp-fkey-kbd">F4</span> Contra
+        </button>
+        <button
+          type="button"
+          className={`erp-fkey-btn ${currentView === 'accounting' && accountingSubTab === 'vouchers' && accountingVoucherType === 'Payment' ? 'active' : ''}`}
+          onClick={() => openAccountingAt('vouchers', 'Payment')}
+        >
+          <span className="erp-fkey-kbd">F5</span> Payment
+        </button>
+        <button
+          type="button"
+          className={`erp-fkey-btn ${currentView === 'accounting' && accountingSubTab === 'vouchers' && accountingVoucherType === 'Receipt' ? 'active' : ''}`}
+          onClick={() => openAccountingAt('vouchers', 'Receipt')}
+        >
+          <span className="erp-fkey-kbd">F6</span> Receipt
+        </button>
+        <button
+          type="button"
+          className={`erp-fkey-btn ${currentView === 'accounting' && accountingSubTab === 'vouchers' && accountingVoucherType === 'Journal' ? 'active' : ''}`}
+          onClick={() => openAccountingAt('vouchers', 'Journal')}
+        >
+          <span className="erp-fkey-kbd">F7</span> Journal
+        </button>
+        <button
+          type="button"
+          className={`erp-fkey-btn ${currentView === 'new' ? 'active' : ''}`}
+          onClick={handleNewInvoice}
+        >
+          <span className="erp-fkey-kbd">F8</span> Sales Invoice
+        </button>
+        <button
+          type="button"
+          className={`erp-fkey-btn ${currentView === 'purchases' && purchaseSubTab !== 'ocr' ? 'active' : ''}`}
+          onClick={() => openPurchasesAt('bills')}
+        >
+          <span className="erp-fkey-kbd">F9</span> Purchase Bill
+        </button>
+        <button
+          type="button"
+          className={`erp-fkey-btn ${currentView === 'pos' ? 'active' : ''}`}
+          onClick={() => setCurrentView('pos')}
+        >
+          <span className="erp-fkey-kbd">Alt+P</span> POS Counter
+        </button>
+        <button
+          type="button"
+          className={`erp-fkey-btn ${currentView === 'purchases' && purchaseSubTab === 'ocr' ? 'active' : ''}`}
+          onClick={() => openPurchasesAt('ocr')}
+        >
+          <span className="erp-fkey-kbd">Alt+U</span> AI/OCR Bill
+        </button>
+        <button
+          type="button"
+          className={`erp-fkey-btn ${currentView === 'accounting' && accountingSubTab === 'ledgers' ? 'active' : ''}`}
+          onClick={() => openAccountingAt('ledgers')}
+        >
+          <span className="erp-fkey-kbd">Alt+L</span> Ledgers &amp; BRS
+        </button>
+        <button
+          type="button"
+          className={`erp-fkey-btn ${currentView === 'inventory' ? 'active' : ''}`}
+          onClick={() => setCurrentView('inventory')}
+        >
+          <span className="erp-fkey-kbd">Alt+I</span> Spare Parts
+        </button>
+        <button
+          type="button"
+          className={`erp-fkey-btn ${currentView === 'accounting' && accountingSubTab === 'trial-balance' ? 'active' : ''}`}
+          onClick={() => openAccountingAt('trial-balance')}
+        >
+          <span className="erp-fkey-kbd">Alt+T</span> Trial Bal
+        </button>
+        <button
+          type="button"
+          className={`erp-fkey-btn ${currentView === 'accounting' && accountingSubTab === 'profit-loss' ? 'active' : ''}`}
+          onClick={() => openAccountingAt('profit-loss')}
+        >
+          <span className="erp-fkey-kbd">Alt+F</span> P&amp;L A/c
+        </button>
+        <button
+          type="button"
+          className={`erp-fkey-btn ${currentView === 'accounting' && accountingSubTab === 'balance-sheet' ? 'active' : ''}`}
+          onClick={() => openAccountingAt('balance-sheet')}
+        >
+          <span className="erp-fkey-kbd">Alt+B</span> Bal Sheet
+        </button>
+        <button
+          type="button"
+          className={`erp-fkey-btn ${currentView === 'filing' ? 'active' : ''}`}
+          onClick={() => setCurrentView('filing')}
+        >
+          <span className="erp-fkey-kbd">Alt+S</span> GST Hub
+        </button>
+      </div>
+
+      {/* Main Application Shell */}
+      <div className={`app-container app-layout${sidebarAutoHide ? ' sidebar-autohide' : ''}${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
+        {showWizard && <SetupWizard onClose={() => setShowWizard(false)} />}
+        {showResumeSetupPill && (
+          <button
+            type="button"
+            onClick={() => setShowWizard(true)}
+            title="Come back to the setup wizard — pick a business type, paper size, and language."
+            style={{
+              position: 'fixed', bottom: currentView === 'settings' ? '5.5rem' : '1.25rem', right: '1.25rem', zIndex: 9998,
+              padding: '0.6rem 1rem', borderRadius: 999,
+              background: 'var(--primary)', color: '#fff', border: 'none',
+              fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer',
+              boxShadow: '0 6px 20px rgba(30,64,175,0.35), 0 2px 4px rgba(0,0,0,0.15)',
+              display: 'flex', alignItems: 'center', gap: '0.4rem',
+            }}
+          >
+            ✨ Finish setup
+          </button>
+        )}
+
+        <div className="mobile-topbar">
+          <button type="button" className="mobile-topbar-btn" onClick={() => setNavOpen(true)}
+            aria-label="Open menu" aria-expanded={navOpen}>
+            <Menu size={22} />
+          </button>
+          <span className="mobile-topbar-title">GST Billing</span>
+          <span className="mobile-topbar-business">{activeCompanyName}</span>
+          {topActions}
+        </div>
+        {navOpen && <div className="sidebar-backdrop" onClick={() => setNavOpen(false)} aria-hidden="true" />}
+
+        {/* 3. Consolidated 5-Pillar Left Sidebar Navigation */}
+        <div className={`sidebar${navOpen ? ' sidebar-open' : ''}`} onClick={closeNavAfterPick}>
+          <nav className="sidebar-nav" style={{ display: 'flex', flexDirection: 'column', gap: '2px', height: '100%' }}>
+            {/* Pillar 1: Overview */}
+            <div className="sidebar-pillar-label">1. Overview</div>
+            <button
+              type="button"
+              className={`nav-btn ${currentView === 'dashboard' ? 'nav-btn-active' : ''}`}
+              onClick={() => setCurrentView('dashboard')}
+            >
+              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Home size={15} /> Executive Dashboard
+              </span>
+              <span className="nav-btn-shortcut">Alt+D</span>
+            </button>
+
+            {/* Pillar 2: Transactions & Vouchers */}
+            <div className="sidebar-pillar-label">2. Transactions &amp; Vouchers</div>
+            <button
+              type="button"
+              className={`nav-btn ${currentView === 'new' ? 'nav-btn-active' : ''}`}
+              onClick={handleNewInvoice}
+            >
+              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Plus size={15} /> Sales &amp; POS Billing
+              </span>
+              <span className="nav-btn-shortcut">F8</span>
+            </button>
+            <button
+              type="button"
+              className={`nav-btn ${currentView === 'pos' ? 'nav-btn-active' : ''}`}
+              onClick={() => setCurrentView('pos')}
+            >
+              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Laptop size={15} /> POS Counter Fast
+              </span>
+              <span className="nav-btn-shortcut">Alt+P</span>
+            </button>
+            <button
+              type="button"
+              className={`nav-btn ${currentView === 'purchases' && purchaseSubTab !== 'ocr' ? 'nav-btn-active' : ''}`}
+              onClick={() => openPurchasesAt('bills')}
+            >
+              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <ShoppingCart size={15} /> Purchase Bills &amp; PO
+              </span>
+              <span className="nav-btn-shortcut">F9</span>
+            </button>
+            <button
+              type="button"
+              className={`nav-btn ${currentView === 'accounting' && accountingSubTab === 'vouchers' ? 'nav-btn-active' : ''}`}
+              onClick={() => openAccountingAt('vouchers', 'Payment')}
+            >
+              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Receipt size={15} /> Pay / Rcpt / Jnl / Contra
+              </span>
+              <span className="nav-btn-shortcut">F4–F7</span>
+            </button>
+            <button
+              type="button"
+              className={`nav-btn ${currentView === 'purchases' && purchaseSubTab === 'ocr' ? 'nav-btn-active' : ''}`}
+              onClick={() => openPurchasesAt('ocr')}
+            >
+              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <FileText size={15} /> AI/OCR Bill Capture
+              </span>
+              <span className="nav-btn-shortcut">Alt+U</span>
+            </button>
+
+            {/* Pillar 3: Masters & Inventory */}
+            <div className="sidebar-pillar-label">3. Masters &amp; Inventory</div>
+            <button
+              type="button"
+              className={`nav-btn ${currentView === 'accounting' && accountingSubTab === 'ledgers' ? 'nav-btn-active' : ''}`}
+              onClick={() => openAccountingAt('ledgers')}
+            >
+              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Landmark size={15} /> Parties, Ledgers &amp; BRS
+              </span>
+              <span className="nav-btn-shortcut">Alt+L</span>
+            </button>
+            <button
+              type="button"
+              className={`nav-btn ${currentView === 'inventory' ? 'nav-btn-active' : ''}`}
+              onClick={() => setCurrentView('inventory')}
+            >
+              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Package size={15} /> Spare-Parts &amp; Stock
+              </span>
+              <span className="nav-btn-shortcut">Alt+I</span>
+            </button>
+
+            {/* Pillar 4: Financial & GST Reports */}
+            <div className="sidebar-pillar-label">4. Financial &amp; GST Reports</div>
+            <button
+              type="button"
+              className={`nav-btn ${currentView === 'accounting' && accountingSubTab === 'trial-balance' ? 'nav-btn-active' : ''}`}
+              onClick={() => openAccountingAt('trial-balance')}
+            >
+              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <BarChart3 size={15} /> Trial Balance
+              </span>
+              <span className="nav-btn-shortcut">Alt+T</span>
+            </button>
+            <button
+              type="button"
+              className={`nav-btn ${currentView === 'accounting' && accountingSubTab === 'profit-loss' ? 'nav-btn-active' : ''}`}
+              onClick={() => openAccountingAt('profit-loss')}
+            >
+              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <BarChart3 size={15} /> Profit &amp; Loss A/c
+              </span>
+              <span className="nav-btn-shortcut">Alt+F</span>
+            </button>
+            <button
+              type="button"
+              className={`nav-btn ${currentView === 'accounting' && accountingSubTab === 'balance-sheet' ? 'nav-btn-active' : ''}`}
+              onClick={() => openAccountingAt('balance-sheet')}
+            >
+              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Landmark size={15} /> Balance Sheet
+              </span>
+              <span className="nav-btn-shortcut">Alt+B</span>
+            </button>
+            <button
+              type="button"
+              className={`nav-btn ${currentView === 'filing' ? 'nav-btn-active' : ''}`}
+              onClick={() => setCurrentView('filing')}
+            >
+              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <BookOpen size={15} /> GST Compliance Hub
+              </span>
+              <span className="nav-btn-shortcut">Alt+S</span>
+            </button>
+
+            {/* Pillar 5: Migration & Config */}
+            <div className="sidebar-pillar-label">5. Migration &amp; Config</div>
             <button
               type="button"
               className="nav-btn"
               onClick={() => setShowBusyModal(true)}
-              title="Import masters and transactions from BUSY Accounting (.DAT, Excel, CSV, JSON)"
               style={{
-                background: 'rgba(37, 99, 235, 0.12)',
-                borderColor: 'rgba(37, 99, 235, 0.3)',
-                color: '#93c5fd',
-                fontSize: '0.82rem',
+                background: '#EFF6FF',
+                borderColor: '#BFDBFE',
+                color: '#1D4ED8',
+                fontWeight: 600,
               }}
             >
-              <FileSpreadsheet size={16} /> BUSY .DAT Import
+              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <FileSpreadsheet size={15} /> BUSY .DAT Migration
+              </span>
+              <span className="nav-btn-shortcut">Import</span>
             </button>
-            {/* v1.10.83 - in the order chosen in Settings → Features; switched-off
-                ones are already left out of bottomIds. */}
-            {bottomIds.map(id => ({
-              support: (
-                <button key={id}
-                  className={`nav-btn nav-btn-support${currentView === 'support' ? ' nav-btn-support-active' : ''}`}
-                  onClick={() => setCurrentView('support')}
-                  title="Who makes this app, and how to help"
-                >
-                  <Heart size={18} /> Support &amp; About
-                </button>
-              ),
-              controlpanel: (
-                <button key={id}
-                  className={`nav-btn ${currentView === 'controlpanel' ? 'nav-btn-active' : ''}`}
-                  onClick={() => setCurrentView('controlpanel')}
-                  title={`${serverStatus === 'online' ? 'App Ready' : serverStatus === 'offline' ? 'App Not Running' : 'Connecting...'} - update, backup, restore, move to another PC`}
-                >
-                  <HardDrive size={18} /> Control Panel
-                  {/* v1.10.83 - the app's status dot, formerly the "App Ready" box under the menu. */}
-                  <span className={`server-status-dot server-status-${serverStatus}`} aria-label={serverStatus === 'online' ? 'App Ready' : serverStatus === 'offline' ? 'App Not Running' : 'Connecting'} />
-                </button>
-              ),
-              settings: (
-                <button key={id}
-                  className={`nav-btn ${currentView === 'settings' ? 'nav-btn-active' : ''}`}
-                  onClick={() => setCurrentView('settings')}
-                  style={updateBannerVisible ? { position: 'relative' } : undefined}
-                >
-                  <Settings size={18} /> Settings
-                  {updateBannerVisible && (
-                    <span className="nav-badge" style={{
-                      position: 'absolute', top: '8px', right: '12px',
-                      width: 8, height: 8, borderRadius: '50%',
-                      background: '#f59e0b',
-                    }} title="Update available" />
-                  )}
-                </button>
-              ),
-            })[id])}
-          </div>
-        </nav>
-      </div>
-
-      <div className="main-content">
-        <div className="app-topbar">
-          {sidebarAutoHide && (
             <button
               type="button"
-              className="topbar-btn"
-              onClick={() => toggleSidebarAutoHide(false)}
-              title="Show sidebar menu"
-              aria-label="Show sidebar menu"
-              style={{ marginRight: 'auto' }}
+              className={`nav-btn ${currentView === 'settings' ? 'nav-btn-active' : ''}`}
+              onClick={() => setCurrentView('settings')}
             >
-              <Menu size={18} />
+              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Settings size={15} /> BUSY .DAT &amp; Settings
+              </span>
+              <span className="nav-btn-shortcut">F11</span>
             </button>
-          )}
-          {/* v1.10.83 - the promise, on every screen (it was under the app name in the menu). */}
-          <span className="topbar-free" title="Free forever: no paid version, no locked features, no ads, no tracking. Works on this computer, even offline.">Free forever</span>
-          {topActions}
+
+            {/* Expandable Classic Sub-Modules (Zero Feature Loss) */}
+            <div style={{ marginTop: '6px', borderTop: '1px solid #1E293B', paddingTop: '6px' }}>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowMoreModules(m => !m);
+                }}
+                style={{
+                  width: '100%',
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#64748B',
+                  fontSize: '10.5px',
+                  fontWeight: 700,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                  padding: '4px 8px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  cursor: 'pointer',
+                }}
+              >
+                <span>Registers &amp; Utilities</span>
+                <ChevronDown size={12} style={{ transform: showMoreModules ? 'rotate(180deg)' : 'none' }} />
+              </button>
+
+              {(showMoreModules || ['clients', 'expenses', 'receipts', 'cashbook', 'recurring', 'reports', 'incometax', 'controlpanel', 'support'].includes(currentView)) && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', marginTop: '2px' }}>
+                  <button type="button" className={`nav-btn ${currentView === 'clients' ? 'nav-btn-active' : ''}`} onClick={() => setCurrentView('clients')}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Users size={14} /> Clients Register</span>
+                  </button>
+                  <button type="button" className={`nav-btn ${currentView === 'expenses' ? 'nav-btn-active' : ''}`} onClick={() => setCurrentView('expenses')}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Wallet size={14} /> Expenses Register</span>
+                  </button>
+                  <button type="button" className={`nav-btn ${currentView === 'receipts' ? 'nav-btn-active' : ''}`} onClick={() => setCurrentView('receipts')}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Receipt size={14} /> Receipts Register</span>
+                  </button>
+                  <button type="button" className={`nav-btn ${currentView === 'cashbook' ? 'nav-btn-active' : ''}`} onClick={() => setCurrentView('cashbook')}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Banknote size={14} /> Cash Book</span>
+                  </button>
+                  <button type="button" className={`nav-btn ${currentView === 'recurring' ? 'nav-btn-active' : ''}`} onClick={() => setCurrentView('recurring')}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><RefreshCw size={14} /> Recurring Bills</span>
+                  </button>
+                  <button type="button" className={`nav-btn ${currentView === 'reports' ? 'nav-btn-active' : ''}`} onClick={() => setCurrentView('reports')}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><BarChart3 size={14} /> Analytics Reports</span>
+                  </button>
+                  <button type="button" className={`nav-btn ${currentView === 'incometax' ? 'nav-btn-active' : ''}`} onClick={() => setCurrentView('incometax')}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Calculator size={14} /> Income Tax &amp; 44AD</span>
+                  </button>
+                  {bottomIds.includes('controlpanel') && (
+                    <button type="button" className={`nav-btn ${currentView === 'controlpanel' ? 'nav-btn-active' : ''}`} onClick={() => setCurrentView('controlpanel')}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><HardDrive size={14} /> Control Panel</span>
+                      <span className={`server-status-dot server-status-${serverStatus}`} />
+                    </button>
+                  )}
+                  {bottomIds.includes('support') && (
+                    <button type="button" className={`nav-btn ${currentView === 'support' ? 'nav-btn-active' : ''}`} onClick={() => setCurrentView('support')}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Heart size={14} /> Support &amp; About</span>
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </nav>
         </div>
-        {/* v1.10.83 - a screen that throws shows "ran into a problem" here
-            instead of blanking the app; keyed by screen so the sidebar works
-            and opening another screen starts clean. */}
-        <ErrorBoundary key={currentView} onHome={() => setCurrentView('dashboard')}>
-        {currentView !== 'new' && <StarBanner />}
-        {currentView === 'dashboard' && (
-          <Dashboard onNew={handleNewInvoice} onEdit={handleEditInvoice} onPrint={handlePrintInvoice} onDuplicate={handleDuplicateInvoice} onConvert={handleConvertToInvoice} onOpenProducts={() => setCurrentView('inventory')} onOpenSettings={() => setCurrentView('settings')} onOpenGuide={openDocs} onOpenSupport={() => setCurrentView('support')} activeProfile={profile} />
-        )}
-        {currentView === 'new' && (
-          <InvoiceGenerator
-            key={editorKey}
-            onBack={() => { setEditingBill(null); setCurrentView('dashboard'); }}
-            profile={profile} editingBill={editingBill}
-          />
-        )}
-        {/* v1.10.4 — All lazy views under one Suspense boundary. Only the
-             matched view's chunk actually loads; others stay unfetched. */}
-        <Suspense fallback={<ViewLoading />}>
-        {currentView === 'pos' && (
-          <POSView key={businessKey} showToast={toast} onOpenFullInvoice={handleNewInvoice} />
-        )}
-        {currentView === 'clients' && (
-          <ClientsView onNew={handleNewInvoice} onEdit={handleEditInvoice} onDuplicate={handleDuplicateInvoice} />
-        )}
-        {currentView === 'inventory' && (
-          // v1.10.83 (#115) - remounted per business, like the screens below, so its production list follows the switch.
-          <InventoryView key={businessKey} showToast={toast} onOpenBusyImport={() => setShowBusyModal(true)} />
-        )}
-        {currentView === 'accounting' && (
-          <AccountingView key={businessKey} showToast={toast} />
-        )}
-        {/* v1.10.66 (#64 item 1) — `key={businessKey}` remounts these screens
-            when the business changes. Each reads the business once when it
-            opens, so a switch left the previous company's records on screen,
-            and a record added straight after switching was saved under the OLD
-            business. Remounting makes every one of them read it again. */}
-        {currentView === 'expenses' && (
-          <ExpenseTracker key={businessKey} />
-        )}
-        {currentView === 'purchases' && (
-          <PurchaseBills key={businessKey} />
-        )}
-        {currentView === 'recurring' && (
-          <RecurringInvoices key={businessKey} onEdit={handleEditInvoice} />
-        )}
-        {currentView === 'receipts' && (
-          <ReceiptVoucher key={businessKey} />
-        )}
-        {currentView === 'cashbook' && (
-          <CashBook key={businessKey} onOpenView={setCurrentView} />
-        )}
-        {currentView === 'reports' && (
-          <ReportsView key={businessKey} />
-        )}
-        {currentView === 'filing' && (
-          <GSTReturns key={businessKey} />
-        )}
-        {currentView === 'incometax' && (
-          <IncomeTax key={businessKey} />
-        )}
-        {currentView === 'settings' && (
-          <SettingsView onSaved={(p) => setProfile(p)} />
-        )}
-        {currentView === 'controlpanel' && (
-          <ControlPanel />
-        )}
-        {currentView === 'support' && (
-          <SupportView />
-        )}
-        </Suspense>
-        {showBusyModal && (
-          <Suspense fallback={<ViewLoading />}>
-            <BusyImportModal
-              showToast={toast}
-              onClose={() => setShowBusyModal(false)}
-              onImportCompleted={() => {
-                // Force refresh of current view data when BUSY import completes
-                setEditorKey(k => k + 1);
-              }}
-            />
-          </Suspense>
-        )}
-        {/* Version + DiceCodes line: Dashboard only, so it never takes space on working screens. */}
-        {currentView === 'dashboard' && <AppFooter onOpenSupport={() => setCurrentView('support')} />}
-        </ErrorBoundary>
+
+        <div className="main-content">
+          <ErrorBoundary key={currentView} onHome={() => setCurrentView('dashboard')}>
+            {currentView !== 'new' && <StarBanner />}
+            {currentView === 'dashboard' && (
+              <Dashboard
+                onNew={handleNewInvoice}
+                onEdit={handleEditInvoice}
+                onPrint={handlePrintInvoice}
+                onDuplicate={handleDuplicateInvoice}
+                onConvert={handleConvertToInvoice}
+                onOpenProducts={() => setCurrentView('inventory')}
+                onOpenSettings={() => setCurrentView('settings')}
+                onOpenGuide={openDocs}
+                onOpenSupport={() => setCurrentView('support')}
+                onOpenAccounting={(subTab, vType) => openAccountingAt(subTab, vType)}
+                activeProfile={profile}
+                globalFy={globalFy}
+              />
+            )}
+            {currentView === 'new' && (
+              <InvoiceGenerator
+                key={editorKey}
+                onBack={() => { setEditingBill(null); setCurrentView('dashboard'); }}
+                profile={profile}
+                editingBill={editingBill}
+                onOpenSeriesModal={() => setShowSeriesModal(true)}
+                onOpenQuickMaster={() => setShowQuickMasterModal(true)}
+              />
+            )}
+            <Suspense fallback={<ViewLoading />}>
+              {currentView === 'pos' && (
+                <POSView key={businessKey} showToast={toast} onOpenFullInvoice={handleNewInvoice} />
+              )}
+              {currentView === 'clients' && (
+                <ClientsView onNew={handleNewInvoice} onEdit={handleEditInvoice} onDuplicate={handleDuplicateInvoice} />
+              )}
+              {currentView === 'inventory' && (
+                <InventoryView
+                  key={businessKey}
+                  showToast={toast}
+                  onOpenBusyImport={() => setShowBusyModal(true)}
+                  onAddPartToBill={() => handleNewInvoice()}
+                />
+              )}
+              {currentView === 'accounting' && (
+                <AccountingView
+                  key={`${businessKey}_${accountingSubTab}_${accountingVoucherType}`}
+                  showToast={toast}
+                  initialTab={accountingSubTab}
+                  initialVoucherType={accountingVoucherType}
+                  onOpenQuickMaster={() => setShowQuickMasterModal(true)}
+                />
+              )}
+              {currentView === 'expenses' && (
+                <ExpenseTracker key={businessKey} />
+              )}
+              {currentView === 'purchases' && (
+                <PurchaseBills
+                  key={`${businessKey}_${purchaseSubTab}`}
+                  initialTab={purchaseSubTab}
+                  onOpenQuickMaster={() => setShowQuickMasterModal(true)}
+                />
+              )}
+              {currentView === 'recurring' && (
+                <RecurringInvoices key={businessKey} onEdit={handleEditInvoice} />
+              )}
+              {currentView === 'receipts' && (
+                <ReceiptVoucher key={businessKey} />
+              )}
+              {currentView === 'cashbook' && (
+                <CashBook key={businessKey} onOpenView={setCurrentView} />
+              )}
+              {currentView === 'reports' && (
+                <ReportsView key={businessKey} />
+              )}
+              {currentView === 'filing' && (
+                <GSTReturns key={businessKey} />
+              )}
+              {currentView === 'incometax' && (
+                <IncomeTax key={businessKey} />
+              )}
+              {currentView === 'settings' && (
+                <SettingsView onSaved={(p) => setProfile(p)} />
+              )}
+              {currentView === 'controlpanel' && (
+                <ControlPanel />
+              )}
+              {currentView === 'support' && (
+                <SupportView />
+              )}
+            </Suspense>
+            {showBusyModal && (
+              <Suspense fallback={<ViewLoading />}>
+                <BusyImportModal
+                  showToast={toast}
+                  onClose={() => setShowBusyModal(false)}
+                  onImportCompleted={() => {
+                    setEditorKey(k => k + 1);
+                  }}
+                />
+              </Suspense>
+            )}
+            {currentView === 'dashboard' && <AppFooter onOpenSupport={() => setCurrentView('support')} />}
+          </ErrorBoundary>
+        </div>
       </div>
 
-      {/* Update modal — release notes + Export-backup-first nudge + Update Now */}
-      {/* Notification popover — rendered as a click-out modal so it works on
-          tablets too. Grouped by category with a navigate-to button per group. */}
+      {/* Multiple Invoice Series Configuration Modal */}
+      <InvoiceSeriesModal
+        isOpen={showSeriesModal}
+        onClose={() => setShowSeriesModal(false)}
+      />
+
+      {/* Instant Master Creation Modal (Alt+C) */}
+      <QuickMasterModal
+        isOpen={showQuickMasterModal}
+        onClose={() => setShowQuickMasterModal(false)}
+        onCreated={({ type }) => {
+          toast(`Master (${type}) created and synced to ledgers.`, 'success', 4000);
+          setEditorKey(k => k + 1);
+        }}
+      />
+
+      {/* Notification Popover */}
       {showNotifs && (
         <div className="modal-overlay" onClick={() => setShowNotifs(false)}>
           <div className="modal-content" style={{ maxWidth: '480px' }} onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
               <h3 className="section-title" style={{ margin: 0 }}>Notifications <HelpButton title="Notifications" doc="shortcuts#notifications" size={16} /></h3>
               <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                {/* v1.10.62 (#53) — clears everything currently shown. Each
-                    section remembers exactly WHAT was cleared, so a genuinely
-                    new overdue invoice or a different product running low
-                    brings the alert back by itself. */}
                 {dismissableCount > 0 && (
                   <button
                     type="button"
                     className="btn"
                     onClick={markAllNotifsRead}
                     style={{ fontSize: '0.78rem', padding: '0.3rem 0.6rem' }}
-                    title="Clear these notifications. They return if something new happens.">
+                  >
                     Mark all as read
                   </button>
                 )}
@@ -1236,9 +1688,6 @@ function App() {
                     <span className="notice-icon">🔁</span>
                     <div style={{ flex: 1 }}>
                       <strong>{notifications.autoFire.count} recurring invoice{notifications.autoFire.count !== 1 ? 's' : ''} auto-generated today</strong>
-                      <div style={{ fontSize: '0.72rem', opacity: 0.85, marginTop: '0.2rem' }}>
-                        Check the Dashboard for the new bills · review and download PDFs as needed
-                      </div>
                     </div>
                   </button>
                 )}
@@ -1247,9 +1696,6 @@ function App() {
                     <span className="notice-icon">⚠</span>
                     <div style={{ flex: 1 }}>
                       <strong>{notifications.overdue.length} overdue invoice{notifications.overdue.length !== 1 ? 's' : ''}</strong>
-                      <div style={{ fontSize: '0.72rem', opacity: 0.85, marginTop: '0.2rem' }}>
-                        {notifications.overdue.slice(0, 3).map(b => b.invoiceNumber).join(' · ')}{notifications.overdue.length > 3 ? ` · +${notifications.overdue.length - 3} more` : ''}
-                      </div>
                     </div>
                   </button>
                 )}
@@ -1258,9 +1704,6 @@ function App() {
                     <span className="notice-icon">⏰</span>
                     <div style={{ flex: 1 }}>
                       <strong>{notifications.dueSoon.length} invoice{notifications.dueSoon.length !== 1 ? 's' : ''} due in next 3 days</strong>
-                      <div style={{ fontSize: '0.72rem', opacity: 0.85, marginTop: '0.2rem' }}>
-                        {notifications.dueSoon.slice(0, 3).map(b => `${b.invoiceNumber} (${b.clientName})`).join(' · ')}
-                      </div>
                     </div>
                   </button>
                 )}
@@ -1269,9 +1712,6 @@ function App() {
                     <span className="notice-icon">📋</span>
                     <div style={{ flex: 1 }}>
                       <strong>{notifications.filings.length} GST filing{notifications.filings.length !== 1 ? 's' : ''} due in next 10 days</strong>
-                      <div style={{ fontSize: '0.72rem', opacity: 0.85, marginTop: '0.2rem' }}>
-                        {notifications.filings.slice(0, 3).map(f => `${f.label} (${f.daysAway === 0 ? 'today' : f.daysAway + 'd'})`).join(' · ')}
-                      </div>
                     </div>
                   </button>
                 )}
@@ -1280,9 +1720,6 @@ function App() {
                     <span className="notice-icon">📦</span>
                     <div style={{ flex: 1 }}>
                       <strong>{notifications.lowStock.length} product{notifications.lowStock.length !== 1 ? 's' : ''} low on stock</strong>
-                      <div style={{ fontSize: '0.72rem', opacity: 0.85, marginTop: '0.2rem' }}>
-                        {notifications.lowStock.slice(0, 3).map(p => `${p.name} (${trackedStock(p)} left)`).join(' · ')}
-                      </div>
                     </div>
                   </button>
                 )}
@@ -1292,87 +1729,92 @@ function App() {
         </div>
       )}
 
-      {/* Command palette — Ctrl/Cmd+K. Spotlight-style: type to filter actions,
-          ↑/↓ to navigate, Enter to run, Esc to close. */}
+      {/* Global Go To Command Palette — Alt+G / Ctrl+K */}
       {showPalette && (
         <div className="modal-overlay" onClick={() => setShowPalette(false)}>
-          <div className="modal-content" style={{ maxWidth: '520px', padding: 0, overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.75rem 1rem', borderBottom: '1px solid var(--border-color)' }}>
-              <Search size={16} style={{ color: 'var(--text-muted)' }} />
-              <input autoFocus type="text" placeholder="Type a command or page name…"
+          <div className="modal-content" style={{ maxWidth: '580px', padding: 0, overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.75rem 1rem', borderBottom: '1px solid var(--border-color)', background: '#0F172A', color: '#FFFFFF' }}>
+              <Search size={16} color="#38BDF8" />
+              <input
+                autoFocus
+                type="text"
+                placeholder="Go To Voucher (F4-F9), Ledger, Party GSTIN, OEM Part No, or Report…"
                 value={paletteQuery}
                 onChange={e => { setPaletteQuery(e.target.value); setPaletteIdx(0); }}
-                className="form-input" style={{ border: 0, background: 'transparent', flex: 1, fontSize: '0.95rem' }} />
-              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Esc</span>
+                style={{ border: 0, background: 'transparent', color: '#FFFFFF', flex: 1, fontSize: '13px', outline: 'none' }}
+              />
+              <span style={{ fontSize: '11px', color: '#94A3B8', fontFamily: 'var(--erp-font-mono)' }}>ESC</span>
             </div>
-            <div style={{ maxHeight: '360px', overflowY: 'auto' }}>
+            <div style={{ maxHeight: '380px', overflowY: 'auto' }}>
               {filteredPalette.length === 0 && (
                 <p style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '1.25rem', margin: 0, fontSize: '0.85rem' }}>
                   Nothing matches "{paletteQuery}".
                 </p>
               )}
               {filteredPalette.map((a, i) => (
-                <button key={a.label} type="button"
+                <button
+                  key={`${a.label}_${i}`}
+                  type="button"
                   onClick={() => { a.run(); setShowPalette(false); }}
                   onMouseEnter={() => setPaletteIdx(i)}
                   style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    width: '100%', padding: '0.6rem 1rem', border: 0, cursor: 'pointer',
-                    background: i === paletteIdx ? 'var(--bg-tertiary)' : 'transparent',
-                    color: 'var(--text-primary)', textAlign: 'left', fontSize: '0.88rem',
-                  }}>
+                    width: '100%', padding: '8px 14px', border: 0, borderBottom: '1px solid #F1F5F9', cursor: 'pointer',
+                    background: i === paletteIdx ? '#EFF6FF' : 'transparent',
+                    color: i === paletteIdx ? '#1D4ED8' : '#0F172A', textAlign: 'left', fontSize: '12.5px', fontWeight: i === paletteIdx ? 600 : 500,
+                  }}
+                >
                   <span>{a.label}</span>
-                  {a.hint && <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{a.hint}</span>}
+                  {a.hint && (
+                    <span style={{ fontSize: '11px', fontFamily: 'var(--erp-font-mono)', color: '#1D4ED8', background: '#EFF6FF', border: '1px solid #BFDBFE', padding: '1px 6px', borderRadius: '4px' }}>
+                      {a.hint}
+                    </span>
+                  )}
                 </button>
               ))}
             </div>
-            <div style={{ padding: '0.4rem 1rem', borderTop: '1px solid var(--border-color)', fontSize: '0.7rem', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span><Command size={11} style={{ verticalAlign: 'middle', marginRight: 4 }} />Ctrl+K to toggle · ↑↓ navigate · Enter run <HelpButton title="Quick search" doc="shortcuts#command-palette" size={16} /></span>
-              <button type="button" onClick={() => { setShowPalette(false); setShowShortcutsHelp(true); }} style={{ background: 'none', border: 0, color: 'var(--primary)', cursor: 'pointer', fontSize: '0.7rem' }}>
-                All shortcuts (Ctrl+/)
+            <div style={{ padding: '6px 14px', borderTop: '1px solid var(--border-color)', fontSize: '11px', color: '#64748B', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#F8FAFC' }}>
+              <span><Command size={11} style={{ verticalAlign: 'middle', marginRight: 4 }} />Alt+G / Ctrl+K · ↑↓ navigate · Enter open</span>
+              <button type="button" onClick={() => { setShowPalette(false); setShowShortcutsHelp(true); }} style={{ background: 'none', border: 0, color: '#1D4ED8', cursor: 'pointer', fontSize: '11px', fontWeight: 600 }}>
+                All Tally/BUSY Shortcuts (Ctrl+/)
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Keyboard-shortcuts help — Ctrl/Cmd+/. Single-pane reference. */}
+      {/* Standardized Keyboard Shortcuts Reference Modal */}
       {showShortcutsHelp && (
         <div className="modal-overlay" onClick={() => setShowShortcutsHelp(false)}>
-          <div className="modal-content" style={{ maxWidth: '480px' }} onClick={e => e.stopPropagation()}>
+          <div className="modal-content" style={{ maxWidth: '520px' }} onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-              <h3 className="section-title" style={{ margin: 0 }}>Keyboard Shortcuts <HelpButton title="Keyboard shortcuts" doc="shortcuts#keyboard" size={16} /></h3>
+              <h3 className="section-title" style={{ margin: 0 }}>Standardized TallyPrime / BUSY Keyboard Shortcuts</h3>
               <button className="icon-btn" onClick={() => setShowShortcutsHelp(false)} title="Close"><X size={18} /></button>
             </div>
             <table className="kv-list">
               <tbody>
-                <tr><td><kbd>F1</kbd></td><td>Help &amp; Shortcuts reference</td></tr>
-                <tr><td><kbd>F2</kbd></td><td>New Sales Tax Invoice</td></tr>
-                <tr><td><kbd>F3</kbd></td><td>Purchase Bills &amp; Inward OCR</td></tr>
-                <tr><td><kbd>F4</kbd></td><td>Clients &amp; Debtors</td></tr>
-                <tr><td><kbd>F5</kbd></td><td>Products &amp; Inventory Master</td></tr>
-                <tr><td><kbd>F6</kbd></td><td>Accounting &amp; Ledgers</td></tr>
-                <tr><td><kbd>F7</kbd></td><td>Payment Voucher (in Accounting)</td></tr>
-                <tr><td><kbd>F8</kbd></td><td>Sales Return / Credit Note</td></tr>
-                <tr><td><kbd>F9</kbd></td><td>Purchase Return / Debit Note</td></tr>
-                <tr><td><kbd>F10</kbd></td><td>POS Fast Counter Billing</td></tr>
-                <tr><td><kbd>F11</kbd></td><td>Dashboard / Overview</td></tr>
-                <tr><td><kbd>F12</kbd></td><td>Print current document</td></tr>
-                <tr><td><kbd>Ctrl</kbd>&nbsp;+&nbsp;<kbd>K</kbd></td><td>Open command palette (jump to any page)</td></tr>
-                <tr><td><kbd>Ctrl</kbd>&nbsp;+&nbsp;<kbd>N</kbd></td><td>New invoice</td></tr>
-                <tr><td><kbd>Ctrl</kbd>&nbsp;+&nbsp;<kbd>S</kbd></td><td>Save current invoice (when on the invoice form)</td></tr>
-                <tr><td><kbd>Ctrl</kbd>&nbsp;+&nbsp;<kbd>P</kbd></td><td>Download PDF (when on the invoice form)</td></tr>
-                <tr><td><kbd>Alt</kbd>&nbsp;+&nbsp;<kbd>A</kbd></td><td>Focus Product Search (in POS Counter)</td></tr>
-                <tr><td><kbd>Alt</kbd>&nbsp;+&nbsp;<kbd>C</kbd></td><td>Select Customer (in POS Counter)</td></tr>
-                <tr><td><kbd>Ctrl</kbd>&nbsp;+&nbsp;<kbd>Enter</kbd></td><td>Complete &amp; Print Sale (in POS Counter)</td></tr>
-                <tr><td><kbd>Ctrl</kbd>&nbsp;+&nbsp;<kbd>Shift</kbd>&nbsp;+&nbsp;<kbd>L</kbd></td><td>Lock the app (when a PIN is set)</td></tr>
-                <tr><td><kbd>Ctrl</kbd>&nbsp;+&nbsp;<kbd>Shift</kbd>&nbsp;+&nbsp;<kbd>B</kbd></td><td>Open BUSY .DAT Import Wizard</td></tr>
-                <tr><td><kbd>Esc</kbd></td><td>Close any open modal</td></tr>
+                <tr><td><kbd>F1</kbd></td><td>Switch Company Profile / Help Reference</td></tr>
+                <tr><td><kbd>F4</kbd></td><td>Contra Voucher (Cash ↔ Bank Transfer)</td></tr>
+                <tr><td><kbd>F5</kbd></td><td>Payment Voucher (Supplier / Expense Payout)</td></tr>
+                <tr><td><kbd>F6</kbd></td><td>Receipt Voucher (Customer / Income Inflow)</td></tr>
+                <tr><td><kbd>F7</kbd></td><td>Journal Voucher (Double-Entry Adjustment)</td></tr>
+                <tr><td><kbd>F8</kbd></td><td>Sales Tax Invoice (B2B / B2C / IGST)</td></tr>
+                <tr><td><kbd>F9</kbd></td><td>Purchase Bill / Supplier Inward Voucher</td></tr>
+                <tr><td><kbd>F11</kbd></td><td>Company Settings &amp; BUSY .DAT Migration</td></tr>
+                <tr><td><kbd>Alt</kbd>+<kbd>P</kbd></td><td>POS Counter Fast Billing Mode</td></tr>
+                <tr><td><kbd>Alt</kbd>+<kbd>U</kbd></td><td>AI/OCR Purchase Bill Capture Workbench</td></tr>
+                <tr><td><kbd>Alt</kbd>+<kbd>G</kbd> / <kbd>Ctrl</kbd>+<kbd>K</kbd></td><td>Global "Go To" Command Palette</td></tr>
+                <tr><td><kbd>Alt</kbd>+<kbd>C</kbd></td><td>Instant Master Creation (Party / Ledger / Part)</td></tr>
+                <tr><td><kbd>Alt</kbd>+<kbd>L</kbd></td><td>Parties, General Ledgers &amp; Bank Reconciliation (BRS)</td></tr>
+                <tr><td><kbd>Alt</kbd>+<kbd>I</kbd></td><td>Automotive Spare-Parts &amp; Stock Catalog</td></tr>
+                <tr><td><kbd>Alt</kbd>+<kbd>T</kbd></td><td>Trial Balance Report</td></tr>
+                <tr><td><kbd>Alt</kbd>+<kbd>F</kbd></td><td>Trading &amp; Profit &amp; Loss Account</td></tr>
+                <tr><td><kbd>Alt</kbd>+<kbd>B</kbd></td><td>Balance Sheet (Schedule III)</td></tr>
+                <tr><td><kbd>Alt</kbd>+<kbd>S</kbd></td><td>GST Compliance Hub (GSTR-1 / 2B / 3B / HSN)</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>A</kbd></td><td>Save / Post Active Voucher or Invoice</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>B</kbd></td><td>Collapse / Expand Left Sidebar</td></tr>
               </tbody>
             </table>
-            <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.75rem', marginBottom: 0 }}>
-              On macOS, use <kbd>⌘</kbd> instead of <kbd>Ctrl</kbd>.
-            </p>
           </div>
         </div>
       )}
@@ -1383,62 +1825,17 @@ function App() {
             <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.5rem', marginBottom: '0.5rem' }}>
               <div>
                 <h3 className="section-title" style={{ marginTop: 0, marginBottom: '0.25rem' }}>
-                  Update available — v{updateInfo.latest} <HelpButton title="Updating the app" doc="update#update-window" size={16} />
+                  Update available — v{updateInfo.latest}
                 </h3>
-                <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: 0 }}>
-                  You're on v{updateInfo.current}
-                  {updateInfo.releasePublishedAt && ` · released ${new Date(updateInfo.releasePublishedAt).toLocaleDateString()}`}
-                </p>
               </div>
               <button className="icon-btn" onClick={() => setShowUpdateModal(false)} title="Close"><X size={18} /></button>
             </div>
-
-            {/* Data-safety reassurance — explicit, prominent. Same .notice-info style
-                as the Data Management privacy card so users learn one visual pattern. */}
-            <div className="notice notice-info" style={{ marginBottom: '0.85rem' }}>
-              <span className="notice-icon">🔒</span>
-              <div>
-                <strong>Your data is safe.</strong> Updates only refresh the app code and dependencies — your <code>data/</code> folder (invoices, clients, products, settings) and <code>Saved Invoices/</code> PDF archive are <strong>never touched</strong>. The updater pulls the latest source from GitHub and rebuilds, then restarts.
-              </div>
-            </div>
-
-            {/* Release notes */}
-            <div className="surface-card" style={{ maxHeight: '320px', overflowY: 'auto', whiteSpace: 'pre-wrap', fontSize: '0.82rem', lineHeight: 1.55, marginBottom: '0.85rem' }}>
-              {updateInfo.releaseNotes || (
-                <span style={{ color: 'var(--text-muted)' }}>
-                  No release notes available — see the full changelog at{' '}
-                  <a href={updateInfo.releaseUrl || 'https://github.com/IamRamgarhia/Free-GST-Billing-Software/releases'} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--primary)' }}>GitHub Releases</a>.
-                </span>
-              )}
-            </div>
-
-            {/* Suggested pre-update step: export a backup */}
-            <div className="notice notice-warn" style={{ marginBottom: '1rem' }}>
-              <span className="notice-icon">💡</span>
-              <div>
-                <strong>Recommended:</strong> export a backup before updating, just in case. <button type="button" className="btn-link" onClick={() => { setShowUpdateModal(false); setCurrentView('settings'); }} style={{ background: 'none', border: 0, color: 'var(--primary)', textDecoration: 'underline', cursor: 'pointer', font: 'inherit', padding: 0 }}>Open Settings → Data Management</button> and click <em>Export Backup…</em>.
-              </div>
-            </div>
-
             <div className="flex gap-2 justify-end" style={{ flexWrap: 'wrap' }}>
-              <button type="button" className="btn btn-secondary" onClick={dismissUpdate}>
-                Skip this version
-              </button>
-              <button type="button" className="btn btn-secondary" onClick={() => setShowUpdateModal(false)}>
-                Remind me later
-              </button>
-              {updateInfo.releaseUrl && (
-                <a href={updateInfo.releaseUrl} target="_blank" rel="noopener noreferrer" className="btn btn-secondary" style={{ textDecoration: 'none' }}>
-                  View on GitHub
-                </a>
-              )}
+              <button type="button" className="btn btn-secondary" onClick={dismissUpdate}>Skip this version</button>
               <button type="button" className="btn btn-primary" disabled={updating} onClick={handleUpdateNow}>
                 <Download size={16} /> {updating ? 'Updating…' : 'Update Now'}
               </button>
             </div>
-            <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.6rem', marginBottom: 0 }}>
-              <em>Update Now</em> backs up your data, then fetches the newest release. It takes about a minute — leave this window open, then reload the page when it finishes.
-            </p>
           </div>
         </div>
       )}

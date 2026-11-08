@@ -2,6 +2,7 @@
 import {
   findDuplicateProducts,
   normalizeAutomotiveProduct,
+  decodeHtmlEntities,
   KNOWN_ACCOUNT_GROUPS_RE,
   KNOWN_ACCOUNT_NAMES_RE,
 } from './products.js';
@@ -137,15 +138,9 @@ function splitDelimitedLine(line, delimiter = ',') {
   return out;
 }
 
-// Decode basic XML entities in BUSY .DAT XML values
+// Decode basic and double-escaped XML entities in BUSY .DAT XML values (e.g. &amp;amp; -> &)
 function decodeXmlEntities(str = '') {
-  return String(str)
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .trim();
+  return decodeHtmlEntities(str);
 }
 
 // BUSY numeric MasterType codes used inside <MasterType> or <Type> in BUSY .DAT exports
@@ -350,8 +345,8 @@ function normalizeRawBusyRow(row = {}, sourceFile = '', rowIndex = 1) {
   const xmlTag = String(row._xmlTag || '').trim().toLowerCase();
   const xmlMapped = BUSY_XML_TAG_MAP[xmlTag];
 
-  const rawCategory = String(getField(row, ['recordCategory', 'categoryType', 'kind', '_section']) || '').trim();
-  let rawType = String(getField(row, ['recordType', 'masterType', 'voucherType', 'txnType', 'type', 'vchType']) || '').trim();
+  const rawCategory = decodeHtmlEntities(getField(row, ['recordCategory', 'categoryType', 'kind', '_section']) || '');
+  let rawType = decodeHtmlEntities(getField(row, ['recordType', 'masterType', 'voucherType', 'txnType', 'type', 'vchType']) || '');
 
   // If rawType is a numeric BUSY MasterType code (e.g., "1", "2", "6"), map it or prefer the explicit XML tag
   if (BUSY_NUMERIC_MASTER_CODE_MAP[rawType]) {
@@ -360,8 +355,8 @@ function normalizeRawBusyRow(row = {}, sourceFile = '', rowIndex = 1) {
     rawType = xmlMapped.subType;
   }
 
-  const nameVal = String(getField(row, ['name', 'itemName', 'accountName', 'partyName', 'printName', 'particulars']) || '').trim();
-  const accountGroupVal = String(getField(row, ['accountGroup', 'parentGroup', 'parentGrp', 'groupName', 'grpName', 'accGrp', 'underGroup', 'underGrp', 'masterGroup', 'group']) || '').trim();
+  const nameVal = decodeHtmlEntities(getField(row, ['name', 'itemName', 'accountName', 'partyName', 'printName', 'particulars']) || '');
+  const accountGroupVal = decodeHtmlEntities(getField(row, ['accountGroup', 'parentGroup', 'parentGrp', 'groupName', 'grpName', 'accGrp', 'underGroup', 'underGrp', 'masterGroup', 'group']) || '');
   const hasKnownAccountGroup = Boolean(accountGroupVal && KNOWN_ACCOUNT_GROUPS_RE.test(accountGroupVal));
   const hasKnownAccountName = Boolean(nameVal && KNOWN_ACCOUNT_NAMES_RE.test(nameVal));
 

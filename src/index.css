@@ -3743,3 +3743,455 @@ html:not([data-theme="dark"]) .welcome-card-close:hover { background: rgba(15, 2
   color: var(--text-primary);
 }
 
+/* ============================================================================
+   ENTERPRISE ERP & INDIAN ACCOUNTING DESIGN SYSTEM (TallyPrime/BUSY + Zoho/Xero)
+   ============================================================================ */
+
+:root {
+  --erp-font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --erp-font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --erp-slate-900: #0F172A;
+  --erp-slate-800: #1E293B;
+  --erp-slate-700: #334155;
+  --erp-canvas: #F1F5F9;
+  --erp-surface: #FFFFFF;
+  --erp-border: #E2E8F0;
+  --erp-row-height: 34px;
+  --erp-input-height: 32px;
+  --erp-body-size: 12.75px;
+  --erp-card-pad: 12px;
+}
+
+body {
+  font-family: var(--erp-font-sans);
+  font-size: var(--erp-body-size);
+  background-color: var(--erp-canvas);
+  color: var(--erp-slate-900);
+}
+
+/* Option B — Compact Accounting Workspace (Tally/BUSY High-Speed Grid) */
+body.density-compact {
+  --erp-row-height: 26px;
+  --erp-input-height: 26px;
+  --erp-body-size: 11.5px;
+  --erp-card-pad: 7px;
+  font-size: 11.5px;
+}
+
+body.density-compact .main-content {
+  padding: 0.65rem 0.9rem !important;
+}
+
+body.density-compact .page-header {
+  padding: 0.45rem 0.75rem !important;
+  margin-bottom: 0.55rem !important;
+}
+
+body.density-compact .page-title {
+  font-size: 1.1rem !important;
+}
+
+body.density-compact .glass-panel,
+body.density-compact .glass-card,
+body.density-compact .stat-card {
+  padding: 0.5rem 0.65rem !important;
+}
+
+body.density-compact table th,
+body.density-compact .data-table th {
+  height: 26px !important;
+  padding: 3px 6px !important;
+  font-size: 10.5px !important;
+}
+
+body.density-compact table td,
+body.density-compact .data-table td {
+  height: 26px !important;
+  padding: 2px 6px !important;
+  font-size: 11.5px !important;
+  line-height: 1.15 !important;
+}
+
+body.density-compact input:not([type="checkbox"]):not([type="radio"]),
+body.density-compact select,
+body.density-compact .form-input {
+  min-height: 26px !important;
+  height: 26px !important;
+  padding: 2px 6px !important;
+  font-size: 11.5px !important;
+}
+
+body.density-compact .btn {
+  padding: 3px 8px !important;
+  font-size: 11.5px !important;
+  min-height: 26px !important;
+}
+
+/* Option A — Modern Enterprise ERP (Default) */
+body:not(.density-compact) .main-content {
+  padding: 0.95rem 1.25rem;
+}
+
+body:not(.density-compact) .data-table th {
+  height: 34px;
+  padding: 6px 8px;
+  border-bottom: 2px solid #0F172A;
+  color: #0F172A;
+  background: #F8FAFC;
+}
+
+body:not(.density-compact) .data-table td {
+  height: 34px;
+  padding: 5px 8px;
+  border-bottom: 1px solid #E2E8F0;
+  font-size: 12.5px;
+}
+
+/* Enterprise App Shell Layout */
+.erp-shell-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  background: var(--erp-canvas);
+}
+
+.erp-shell- wrapper .app-container,
+.erp-shell-wrapper .app-container {
+  flex: 1;
+  height: calc(100vh - 80px) !important;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Top Enterprise Context Bar (48px height) */
+.erp-context-bar {
+  height: 48px;
+  min-height: 48px;
+  background: #0F172A;
+  color: #F8FAFC;
+  border-bottom: 1px solid #1E293B;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  gap: 10px;
+  z-index: 60;
+  user-select: none;
+}
+
+/* Persistent Function-Key Voucher Bar (32px height, TallyPrime / BUSY Standard) */
+.erp-fkey-bar {
+  height: 32px;
+  min-height: 32px;
+  background: #1E293B;
+  color: #E2E8F0;
+  border-bottom: 1px solid #334155;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  gap: 4px;
+  overflow-x: auto;
+  z-index: 55;
+  scrollbar-width: none;
+}
+.erp-fkey-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.erp-fkey-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(15, 23, 42, 0.55);
+  color: #E2E8F0;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.12s ease;
+}
+
+.erp-fkey-btn:hover {
+  background: #334155;
+  color: #FFFFFF;
+  border-color: #475569;
+}
+
+.erp-fkey-btn.active {
+  background: #1D4ED8;
+  color: #FFFFFF;
+  border-color: #3B82F6;
+}
+
+.erp-fkey-kbd {
+  font-family: var(--erp-font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  color: #38BDF8;
+  background: rgba(15, 23, 42, 0.85);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.erp-fkey-btn.active .erp-fkey-kbd {
+  color: #FFFFFF;
+  background: rgba(15, 23, 42, 0.4);
+}
+
+/* Collapsible 5-Pillar Left Sidebar */
+.app-container .sidebar {
+  width: 244px;
+  min-width: 244px;
+  background: #0F172A;
+  border-right: 1px solid #1E293B;
+  padding: 8px 8px;
+  transition: width 0.16s ease, min-width 0.16s ease, padding 0.16s ease;
+  overflow-y: auto;
+}
+
+.app-container.sidebar-collapsed .sidebar {
+  width: 0 !important;
+  min-width: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  border-right: none !important;
+}
+
+.sidebar-pillar-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #64748B;
+  padding: 8px 8px 3px;
+  margin-top: 2px;
+}
+
+.sidebar .nav-btn {
+  padding: 6px 9px;
+  font-size: 12px;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.sidebar .nav-btn-shortcut {
+  font-family: var(--erp-font-mono);
+  font-size: 10px;
+  color: #64748B;
+  background: rgba(30, 41, 59, 0.8);
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-left: auto;
+}
+
+.sidebar .nav-btn-active .nav-btn-shortcut {
+  color: #E0F2FE;
+  background: rgba(15, 23, 42, 0.35);
+}
+
+/* Indian Accounting Dr / Cr Badges & Tabular Monospace Numerals */
+.num-mono {
+  font-family: var(--erp-font-mono) !important;
+  font-variant-numeric: tabular-nums !important;
+  color: #0F172A;
+}
+
+.dr-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-family: var(--erp-font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  background: #EFF6FF !important;
+  color: #1D4ED8 !important;
+  border: 1px solid #BFDBFE;
+  line-height: 1.3;
+}
+
+.cr-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-family: var(--erp-font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  background: #F0FDF4 !important;
+  color: #15803D !important;
+  border: 1px solid #BBF7D0;
+  line-height: 1.3;
+}
+
+/* Sticky Table Columns (Zero Horizontal Clipping on 1366x768) */
+.sticky-col-left {
+  position: sticky !important;
+  left: 0 !important;
+  z-index: 10 !important;
+  background: #FFFFFF;
+  box-shadow: 4px 0 8px -4px rgba(15, 23, 42, 0.06);
+}
+
+.sticky-col-right {
+  position: sticky !important;
+  right: 0 !important;
+  z-index: 10 !important;
+  background: #FFFFFF;
+  box-shadow: -4px 0 8px -4px rgba(15, 23, 42, 0.08);
+}
+
+thead .sticky-col-left,
+thead .sticky-col-right {
+  background: #F8FAFC !important;
+  z-index: 15 !important;
+}
+
+tr:hover .sticky-col-left,
+tr:hover .sticky-col-right {
+  background: #F8FAFC;
+}
+
+[data-theme="dark"] .sticky-col-left,
+[data-theme="dark"] .sticky-col-right {
+  background: #0F172A;
+}
+
+/* ============================================================================
+   COMPACT SINGLE-ROW STICKY TOOLBAR & ZERO-WASTED-SPACE INVOICE CREATION GRID
+   ============================================================================ */
+.generator-toolbar.erp-single-row-toolbar {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 6px !important;
+  padding: 5px 8px !important;
+  margin-bottom: 8px !important;
+  min-height: 38px !important;
+  background: #FFFFFF !important;
+  border: 1px solid #CBD5E1 !important;
+  border-radius: 8px !important;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04) !important;
+  overflow-x: auto !important;
+  scrollbar-width: none !important;
+}
+.generator-toolbar.erp-single-row-toolbar::-webkit-scrollbar {
+  display: none;
+}
+[data-theme="dark"] .generator-toolbar.erp-single-row-toolbar {
+  background: #0F172A !important;
+  border-color: #334155 !important;
+}
+
+.erp-toolbar-left,
+.erp-toolbar-right {
+  display: inline-flex !important;
+  align-items: center !important;
+  flex-wrap: nowrap !important;
+  gap: 4px !important;
+  flex-shrink: 0 !important;
+}
+
+.erp-toolbar-divider {
+  width: 1px;
+  height: 18px;
+  background: #CBD5E1;
+  margin: 0 1px;
+  flex-shrink: 0;
+}
+
+.erp-toolbar-btn.btn {
+  height: 27px !important;
+  min-height: 27px !important;
+  padding: 0 7px !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  border-radius: 6px !important;
+  gap: 4px !important;
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
+}
+
+.erp-toolbar-select.form-input {
+  height: 27px !important;
+  min-height: 27px !important;
+  padding: 2px 20px 2px 6px !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  border-radius: 6px !important;
+  background-position: right 5px center !important;
+}
+
+.erp-compact-panel {
+  padding: 8px 12px !important;
+  margin-bottom: 8px !important;
+  border-radius: 8px !important;
+}
+
+.erp-type-chip.type-chip {
+  padding: 2px 8px !important;
+  font-size: 11px !important;
+  border-radius: 5px !important;
+  white-space: nowrap !important;
+}
+
+.erp-billed-to-grid {
+  display: grid;
+  grid-template-columns: 1.7fr 1.1fr 1.8fr;
+  gap: 10px;
+  align-items: start;
+}
+
+.erp-location-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  align-items: start;
+}
+
+.erp-invoice-details-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
+  gap: 10px;
+  align-items: start;
+}
+
+.generator-container .erp-compact-panel .form-group {
+  margin-bottom: 0;
+}
+
+.generator-container .erp-compact-panel .form-label {
+  font-size: 0.72rem;
+  margin-bottom: 3px;
+}
+
+.generator-container .erp-compact-panel .form-input:not(textarea) {
+  height: 32px;
+  padding: 4px 8px;
+  font-size: 0.82rem;
+  border-radius: 6px;
+}
+
+.generator-container .line-item-row {
+  margin-bottom: 6px !important;
+  padding-bottom: 6px !important;
+}
+
+@media (max-width: 900px) {
+  .erp-billed-to-grid,
+  .erp-location-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}

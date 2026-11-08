@@ -1,36 +1,39 @@
 // Double-Entry Accounting Engine for Indian GST, Automotive Spare-Parts, Ledgers, Vouchers & Financial Statements
 import { isCancelledBill } from '../utils.js';
+import { decodeHtmlEntities } from './products.js';
 
 export const ACCOUNT_GROUPS = [
-  { id: 'Capital Account', nature: 'Liability', statement: 'BS' },
-  { id: 'Loans (Liability)', nature: 'Liability', statement: 'BS' },
-  { id: 'Sundry Creditors', nature: 'Liability', statement: 'BS' },
-  { id: 'Duties & Taxes', nature: 'Liability', statement: 'BS' },
-  { id: 'Current Liabilities', nature: 'Liability', statement: 'BS' },
-  { id: 'Fixed Assets', nature: 'Asset', statement: 'BS' },
-  { id: 'Stock-in-Hand', nature: 'Asset', statement: 'BS' },
-  { id: 'Sundry Debtors', nature: 'Asset', statement: 'BS' },
-  { id: 'Cash-in-Hand', nature: 'Asset', statement: 'BS' },
-  { id: 'Bank Accounts', nature: 'Asset', statement: 'BS' },
-  { id: 'Current Assets', nature: 'Asset', statement: 'BS' },
-  { id: 'Sales Accounts', nature: 'Income', statement: 'PL' },
-  { id: 'Direct Income', nature: 'Income', statement: 'PL' },
-  { id: 'Indirect Income', nature: 'Income', statement: 'PL' },
-  { id: 'Purchase Accounts', nature: 'Expense', statement: 'PL' },
-  { id: 'Direct Expenses', nature: 'Expense', statement: 'PL' },
-  { id: 'Indirect Expenses', nature: 'Expense', statement: 'PL' },
+  { id: 'Capital Account', name: 'Capital Account', nature: 'Liability', defaultSign: 'Cr', statement: 'BS' },
+  { id: 'Loans (Liability)', name: 'Loans (Liability)', nature: 'Liability', defaultSign: 'Cr', statement: 'BS' },
+  { id: 'Sundry Creditors', name: 'Sundry Creditors', nature: 'Liability', defaultSign: 'Cr', statement: 'BS' },
+  { id: 'Duties & Taxes', name: 'Duties & Taxes', nature: 'Liability', defaultSign: 'Cr', statement: 'BS' },
+  { id: 'Current Liabilities', name: 'Current Liabilities', nature: 'Liability', defaultSign: 'Cr', statement: 'BS' },
+  { id: 'Fixed Assets', name: 'Fixed Assets', nature: 'Asset', defaultSign: 'Dr', statement: 'BS' },
+  { id: 'Stock-in-Hand', name: 'Stock-in-Hand', nature: 'Asset', defaultSign: 'Dr', statement: 'BS' },
+  { id: 'Sundry Debtors', name: 'Sundry Debtors', nature: 'Asset', defaultSign: 'Dr', statement: 'BS' },
+  { id: 'Cash-in-Hand', name: 'Cash-in-Hand', nature: 'Asset', defaultSign: 'Dr', statement: 'BS' },
+  { id: 'Bank Accounts', name: 'Bank Accounts', nature: 'Asset', defaultSign: 'Dr', statement: 'BS' },
+  { id: 'Current Assets', name: 'Current Assets', nature: 'Asset', defaultSign: 'Dr', statement: 'BS' },
+  { id: 'Sales Accounts', name: 'Sales Accounts', nature: 'Income', defaultSign: 'Cr', statement: 'PL' },
+  { id: 'Direct Income', name: 'Direct Income', nature: 'Income', defaultSign: 'Cr', statement: 'PL' },
+  { id: 'Indirect Income', name: 'Indirect Income', nature: 'Income', defaultSign: 'Cr', statement: 'PL' },
+  { id: 'Purchase Accounts', name: 'Purchase Accounts', nature: 'Expense', defaultSign: 'Dr', statement: 'PL' },
+  { id: 'Direct Expenses', name: 'Direct Expenses', nature: 'Expense', defaultSign: 'Dr', statement: 'PL' },
+  { id: 'Indirect Expenses', name: 'Indirect Expenses', nature: 'Expense', defaultSign: 'Dr', statement: 'PL' },
 ];
 
 export const VOUCHER_TYPES = [
-  { id: 'Payment', label: 'Payment Voucher', prefix: 'PMT', shortcut: 'F7', desc: 'Record supplier payment, expense payout, or cash/bank outflow' },
-  { id: 'Receipt', label: 'Receipt Voucher', prefix: 'RCP', shortcut: '', desc: 'Record customer payment receipt or miscellaneous income' },
-  { id: 'Journal', label: 'Journal Voucher', prefix: 'JRN', shortcut: '', desc: 'Non-cash adjustment entry between any two ledgers' },
-  { id: 'Contra', label: 'Contra Voucher', prefix: 'CNT', shortcut: '', desc: 'Cash deposit to bank, cash withdrawal from bank, or bank-to-bank transfer' },
-  { id: 'Credit Note', label: 'Credit Note', prefix: 'CNV', shortcut: '', desc: 'Credit customer account for rate diff, discount, or return' },
-  { id: 'Debit Note', label: 'Debit Note', prefix: 'DNV', shortcut: '', desc: 'Debit supplier account for purchase return or claim' },
-  { id: 'Sales Return', label: 'Sales Return Voucher', prefix: 'SRN', shortcut: 'F8', desc: 'Customer spare-parts return with inward stock & GST reversal' },
-  { id: 'Purchase Return', label: 'Purchase Return Voucher', prefix: 'PRN', shortcut: 'F9', desc: 'Return defective/excess parts to supplier with outward stock & ITC reversal' },
-  { id: 'Stock Journal', label: 'Stock Journal', prefix: 'SJN', shortcut: '', desc: 'Internal stock adjustment, kit assembly, or inter-warehouse transfer' },
+  { id: 'Contra', label: 'Contra Voucher', prefix: 'CNT', shortcut: 'F4', desc: 'Cash deposit to bank, cash withdrawal from bank, or bank-to-bank transfer' },
+  { id: 'Payment', label: 'Payment Voucher', prefix: 'PMT', shortcut: 'F5', desc: 'Record supplier payment, expense payout, or cash/bank outflow' },
+  { id: 'Receipt', label: 'Receipt Voucher', prefix: 'RCP', shortcut: 'F6', desc: 'Record customer payment receipt or miscellaneous income' },
+  { id: 'Journal', label: 'Journal Voucher', prefix: 'JRN', shortcut: 'F7', desc: 'Non-cash adjustment entry between any two or more ledgers' },
+  { id: 'Sales', label: 'Sales Voucher', prefix: 'SAL', shortcut: 'F8', desc: 'Taxable or exempt sales entry posted directly to customer & sales ledgers' },
+  { id: 'Purchase', label: 'Purchase Voucher', prefix: 'PUR', shortcut: 'F9', desc: 'Supplier purchase voucher posted directly to supplier & purchase ledgers' },
+  { id: 'Credit Note', label: 'Credit Note', prefix: 'CNV', shortcut: 'Alt+F5', desc: 'Credit customer account for rate diff, discount, or return' },
+  { id: 'Debit Note', label: 'Debit Note', prefix: 'DNV', shortcut: 'Alt+F6', desc: 'Debit supplier account for purchase return or claim' },
+  { id: 'Sales Return', label: 'Sales Return Voucher', prefix: 'SRN', shortcut: 'Alt+F8', desc: 'Customer spare-parts return with inward stock & GST reversal' },
+  { id: 'Purchase Return', label: 'Purchase Return Voucher', prefix: 'PRN', shortcut: 'Alt+F9', desc: 'Return defective/excess parts to supplier with outward stock & ITC reversal' },
+  { id: 'Stock Journal', label: 'Stock Journal', prefix: 'SJN', shortcut: 'Alt+J', desc: 'Internal stock adjustment, kit assembly, or inter-warehouse transfer' },
 ];
 
 export const SYSTEM_LEDGERS = [
@@ -52,7 +55,15 @@ export const SYSTEM_LEDGERS = [
 ];
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
-const normKey = (s) => String(s || '').trim().toLowerCase();
+const normKey = (s) => decodeHtmlEntities(String(s || '')).trim().toLowerCase();
+
+export function formatIndianNumber(n, decimals = 2) {
+  const num = Number(n) || 0;
+  return Math.abs(num).toLocaleString('en-IN', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+}
 
 export const isCashMode = (mode = '') => {
   const m = String(mode || '').toLowerCase();
@@ -81,9 +92,10 @@ export function buildDoubleEntryBook({
     const openAmt = round2(acc.openingBalance);
     const openType = acc.openingType === 'Cr' ? 'Cr' : 'Dr';
     const signedOpening = openType === 'Dr' ? openAmt : -openAmt; // Positive = Dr, Negative = Cr
+    const cleanName = decodeHtmlEntities(acc.name || 'Unnamed Account');
     const entry = {
       id: acc.id,
-      name: acc.name || 'Unnamed Account',
+      name: cleanName,
       code: acc.code || '',
       group: acc.group || 'Current Assets',
       partyType: acc.partyType || null,
@@ -715,6 +727,15 @@ export function buildDoubleEntryBook({
         openingBalanceAdjustment: openingDiff,
         total: round2(totalLiabilitiesBeforeDiff + openingDiff),
       },
+      workingCapital: round2(
+        (closingStockValue + debtorsTotal + supplierAdvances + Math.max(0, cashBalance) + Math.max(0, bankBalance) + (dutiesNet < 0 ? Math.abs(dutiesNet) : 0)) -
+        (creditorsTotal + customerAdvances + (bankBalance < 0 ? Math.abs(bankBalance) : 0) + (cashBalance < 0 ? Math.abs(cashBalance) : 0) + (dutiesNet > 0 ? dutiesNet : 0))
+      ),
+      currentRatio: (() => {
+        const currAssets = closingStockValue + debtorsTotal + supplierAdvances + Math.max(0, cashBalance) + Math.max(0, bankBalance) + (dutiesNet < 0 ? Math.abs(dutiesNet) : 0);
+        const currLiab = creditorsTotal + customerAdvances + (bankBalance < 0 ? Math.abs(bankBalance) : 0) + (cashBalance < 0 ? Math.abs(cashBalance) : 0) + (dutiesNet > 0 ? dutiesNet : 0);
+        return currLiab > 0 ? round2(currAssets / currLiab) : currAssets > 0 ? 99.99 : 1.0;
+      })(),
     },
     ageing: {
       receivables: buildAgeing(bills.filter(b => !['estimate', 'proforma', 'delivery-challan', 'credit-note'].includes(b.invoiceType || b.data?.invoiceType)), true),
@@ -722,3 +743,56 @@ export function buildDoubleEntryBook({
     },
   };
 }
+
+export function computeBrsSummary(account, brsDatesMap = {}) {
+  if (!account) {
+    return {
+      companyBookBalance: 0,
+      companyBalance: 0,
+      companyBookType: 'Dr',
+      companyType: 'Dr',
+      unclearedDeposits: 0,
+      unpresentedCheques: 0,
+      unpresentedPayments: 0,
+      bankStatementBalance: 0,
+      bankStatementType: 'Dr',
+      reconciledCount: 0,
+      unreconciledCount: 0,
+    };
+  }
+  const signedBook = Number(account.signedClosing) || 0;
+  let unclearedDeposits = 0; // Debit entries in bank book not yet cleared in bank
+  let unpresentedCheques = 0; // Credit entries in bank book not yet presented in bank
+  let reconciledCount = 0;
+  let unreconciledCount = 0;
+
+  for (const p of account.postings || []) {
+    const clearDate = brsDatesMap[p.id] || p.bankDate || '';
+    if (clearDate) {
+      reconciledCount++;
+    } else {
+      unreconciledCount++;
+      if (Number(p.debit) > 0) unclearedDeposits = round2(unclearedDeposits + Number(p.debit));
+      if (Number(p.credit) > 0) unpresentedCheques = round2(unpresentedCheques + Number(p.credit));
+    }
+  }
+
+  // Bank statement balance from company perspective (Positive = Dr / Favorable balance in bank)
+  const signedBank = round2(signedBook - unclearedDeposits + unpresentedCheques);
+  const absBook = Math.abs(signedBook);
+  const bookType = signedBook >= 0 ? 'Dr' : 'Cr';
+  return {
+    companyBookBalance: absBook,
+    companyBalance: absBook,
+    companyBookType: bookType,
+    companyType: bookType,
+    unclearedDeposits,
+    unpresentedCheques,
+    unpresentedPayments: unpresentedCheques,
+    bankStatementBalance: Math.abs(signedBank),
+    bankStatementType: signedBank >= 0 ? 'Dr' : 'Cr',
+    reconciledCount,
+    unreconciledCount,
+  };
+}
+
